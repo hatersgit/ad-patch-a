@@ -2326,6 +2326,16 @@ function PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups)
 			PlayerTalentFramePointsBar:SetPoint("BOTTOM", PlayerTalentFrame, "BOTTOM", 0, 81);
 		end
 	end
+	
+	-- Show/hide the points bar reset button based on active spec and glyph frame visibility
+	local pointsBarResetButton = _G["PlayerTalentFramePointsBarResetButton"];
+	if ( pointsBarResetButton ) then
+		if ( isActiveSpec and (not GlyphFrame or not GlyphFrame:IsShown()) ) then
+			pointsBarResetButton:Show();
+		else
+			pointsBarResetButton:Hide();
+		end
+	end
 end
 
 function PlayerTalentFrameActivateButton_OnLoad(self)

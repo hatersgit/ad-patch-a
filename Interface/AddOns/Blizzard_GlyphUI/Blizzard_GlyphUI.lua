@@ -277,11 +277,7 @@ function GlyphFrameGlyph_UpdateSlot (self)
 			end
 		end
 		self.spell = nil;
-		self.shine:Hide(); -- Hide glow when no glyph is socketed
-		-- Hide highlight when no glyph is socketed
-		if ( self.highlight ) then
-			self.highlight:Hide();
-		end
+		self.shine:Show();
 		self.background:Show();
 		self.background:SetTexCoord(GLYPH_SLOTS[0].left, GLYPH_SLOTS[0].right, GLYPH_SLOTS[0].top, GLYPH_SLOTS[0].bottom);
 		if ( not GlyphMatchesSocket(id) ) then
