@@ -14,7 +14,7 @@ MAX_NUM_BRANCH_TEXTURES = 30;
 MAX_NUM_ARROW_TEXTURES = 30;
 INITIAL_TALENT_OFFSET_X = 35;
 INITIAL_TALENT_OFFSET_Y = 20;
-TREE_WIDTH = 300; -- Approximate width of one talent tree
+TREE_WIDTH = 160; -- Approximate width of one talent tree
 
 TALENT_HYBRID_ICON = "Interface\\Icons\\Ability_DualWieldSpecialization";
 
@@ -204,19 +204,42 @@ function TalentFrame_Update(TalentFrame)
 		-- temporary default for classes without talents poor guys
 		base = "Interface\\TalentFrame\\MageFire-";
 	end
-	-- desaturate the background if this isn't the active talent group
-	local backgroundPiece = _G[talentFrameName.."BackgroundTopLeft"];
-	backgroundPiece:SetTexture(base.."TopLeft");
-	SetDesaturation(backgroundPiece, not isActiveTalentGroup);
-	backgroundPiece = _G[talentFrameName.."BackgroundTopRight"];
-	backgroundPiece:SetTexture(base.."TopRight");
-	SetDesaturation(backgroundPiece, not isActiveTalentGroup);
-	backgroundPiece = _G[talentFrameName.."BackgroundBottomLeft"];
-	backgroundPiece:SetTexture(base.."BottomLeft");
-	SetDesaturation(backgroundPiece, not isActiveTalentGroup);
-	backgroundPiece = _G[talentFrameName.."BackgroundBottomRight"];
-	backgroundPiece:SetTexture(base.."BottomRight");
-	SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+	-- For player talents with multi-tab rendering, hide the main background pieces
+	-- They will be replaced by column-specific backgrounds
+	local renderAllTabs = (not TalentFrame.inspect and not TalentFrame.pet and selectedTab ~= 4);
+	if ( renderAllTabs ) then
+		-- Hide main background pieces for player talents
+		local backgroundPiece = _G[talentFrameName.."BackgroundTopLeft"];
+		if ( backgroundPiece ) then
+			backgroundPiece:Hide();
+		end
+		backgroundPiece = _G[talentFrameName.."BackgroundTopRight"];
+		if ( backgroundPiece ) then
+			backgroundPiece:Hide();
+		end
+		backgroundPiece = _G[talentFrameName.."BackgroundBottomLeft"];
+		if ( backgroundPiece ) then
+			backgroundPiece:Hide();
+		end
+		backgroundPiece = _G[talentFrameName.."BackgroundBottomRight"];
+		if ( backgroundPiece ) then
+			backgroundPiece:Hide();
+		end
+	else
+		-- For pet/inspect views, show and desaturate the background if this isn't the active talent group
+		local backgroundPiece = _G[talentFrameName.."BackgroundTopLeft"];
+		backgroundPiece:SetTexture(base.."TopLeft");
+		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece = _G[talentFrameName.."BackgroundTopRight"];
+		backgroundPiece:SetTexture(base.."TopRight");
+		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece = _G[talentFrameName.."BackgroundBottomLeft"];
+		backgroundPiece:SetTexture(base.."BottomLeft");
+		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece = _G[talentFrameName.."BackgroundBottomRight"];
+		backgroundPiece:SetTexture(base.."BottomRight");
+		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+	end
 
 	-- get unspent talent points
 	local unspentPoints = TalentFrame_UpdateTalentPoints(TalentFrame);
@@ -224,6 +247,7 @@ function TalentFrame_Update(TalentFrame)
 	-- For player talents, render all tabs side-by-side when tab 1 (Talents) is selected
 	-- When glyph tab (tab 4) is selected, show glyphs instead
 	-- Tab 1 now represents all talent trees shown together
+	-- Note: renderAllTabs was already defined above, but we need it here too
 	local renderAllTabs = (not TalentFrame.inspect and not TalentFrame.pet and selectedTab ~= 4);
 	local tabsToRender = {};
 	
@@ -238,7 +262,7 @@ function TalentFrame_Update(TalentFrame)
 		local gridContainer = _G[talentFrameName.."GridContainer"];
 		-- Calculate width: 3 columns with 4px padding between them
 		-- Grid dimensions: 4 columns * 56px = 224px width per column
-		local cellSize = 56;
+		local cellSize = 40;
 		local gridWidth = 4 * cellSize; -- 224 pixels per column
 		local gridHeight = 11 * cellSize; -- 616 pixels height
 		local columnPadding = 4; -- 4px gap between columns
@@ -379,8 +403,8 @@ function TalentFrame_Update(TalentFrame)
 					iconTexture:SetPoint("LEFT", headerFrame, "LEFT", 4, 0);
 					headerFrame.iconTexture = iconTexture;
 					
-					-- Create font string for title with larger font size
-					local titleText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge");
+					-- Create font string for title with smaller font size
+					local titleText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal");
 					titleText:SetPoint("LEFT", iconTexture, "RIGHT", 10, 0); -- 4px original + 6px = 10px
 					headerFrame.titleText = titleText;
 					
@@ -421,60 +445,48 @@ function TalentFrame_Update(TalentFrame)
 				
 				headerFrame:Show();
 				
-				-- Set background textures for all columns
-				-- Apply offsets and stretches: 11px x-offset and width increase, 31px y-offset and height increase
+				-- Hide the old 4-part background system
 				local bgTopLeft = _G[talentFrameName.."GridColumn"..colIndex.."BackgroundTopLeft"];
 				local bgTopRight = _G[talentFrameName.."GridColumn"..colIndex.."BackgroundTopRight"];
 				local bgBottomLeft = _G[talentFrameName.."GridColumn"..colIndex.."BackgroundBottomLeft"];
 				local bgBottomRight = _G[talentFrameName.."GridColumn"..colIndex.."BackgroundBottomRight"];
 				
-				-- Base UI offsets: right side is 40px wide, bottom split is 76px from bottom
-				local rightSideWidth = 40; -- Right textures are 40px wide
-				local bottomOffset = 76; -- Bottom split is 76px from bottom (matches base UI)
-				
-				-- Additional offsets for texture gaps: 11px horizontal offset on right side only, 31px vertical
-				local widthIncrease = 12; -- Make backgrounds 11px wider (stretch to fill gaps on right side)
-				local yOffsetBottom = 31; -- Shift bottom textures 31px down
-				local heightIncrease = 31; -- Make backgrounds 31px taller (stretch to fill)
-				
-				-- TopLeft: no x-offset, stretched 11px wider and 31px taller
-				-- Starts at the top of the column (header area), extends to (right edge - 40px + 11px width increase)
-				local headerHeight = 40;
 				if ( bgTopLeft ) then
-					bgTopLeft:SetTexture(treeBase.."TopLeft");
-					bgTopLeft:ClearAllPoints();
-					bgTopLeft:SetPoint("TOPLEFT", colFrame, "TOPLEFT", 0, 0);
-					bgTopLeft:SetPoint("TOPRIGHT", colFrame, "TOPRIGHT", -rightSideWidth + widthIncrease, 0);
-					bgTopLeft:SetPoint("BOTTOM", colFrame, "BOTTOM", 0, bottomOffset - heightIncrease);
+					bgTopLeft:Hide();
 				end
-				-- TopRight: offset 11px right (via widthIncrease), stretched 11px wider and 31px taller
-				-- Extends from TopLeft's right edge to (right edge + 11px width increase)
 				if ( bgTopRight ) then
-					bgTopRight:SetTexture(treeBase.."TopRight");
-					bgTopRight:ClearAllPoints();
-					bgTopRight:SetPoint("TOPRIGHT", colFrame, "TOPRIGHT", widthIncrease, 0);
-					bgTopRight:SetPoint("BOTTOMLEFT", bgTopLeft, "BOTTOMRIGHT");
+					bgTopRight:Hide();
 				end
-				-- BottomLeft: no x-offset, but 31px down, stretched 11px wider and 31px taller
-				-- Starts at 0 and yOffsetBottom (31px down), extends to match TopLeft width
 				if ( bgBottomLeft ) then
-					bgBottomLeft:SetTexture(treeBase.."BottomLeft");
-					bgBottomLeft:ClearAllPoints();
-					bgBottomLeft:SetPoint("BOTTOMLEFT", colFrame, "BOTTOMLEFT", 0, -yOffsetBottom);
-					bgBottomLeft:SetPoint("TOPRIGHT", bgTopLeft, "BOTTOMRIGHT");
-					bgBottomLeft:SetPoint("BOTTOMRIGHT", colFrame, "BOTTOMRIGHT", -rightSideWidth + widthIncrease, -yOffsetBottom);
-					bgBottomLeft:SetPoint("TOPLEFT", bgTopLeft, "BOTTOMLEFT", 0, 0);
+					bgBottomLeft:Hide();
 				end
-				-- BottomRight: offset 11px right and 31px down, stretched 11px wider and 31px taller
-				-- Extends from BottomLeft's right edge to (right edge + 11px width increase)
 				if ( bgBottomRight ) then
-					bgBottomRight:SetTexture(treeBase.."BottomRight");
-					bgBottomRight:ClearAllPoints();
-					bgBottomRight:SetPoint("BOTTOMRIGHT", colFrame, "BOTTOMRIGHT", widthIncrease, -yOffsetBottom);
-					bgBottomRight:SetPoint("TOPLEFT", bgTopLeft, "BOTTOMRIGHT");
-					bgBottomRight:SetPoint("BOTTOMLEFT", bgBottomLeft, "BOTTOMRIGHT");
-					bgBottomRight:SetPoint("TOPRIGHT", bgTopRight, "BOTTOMRIGHT");
+					bgBottomRight:Hide();
 				end
+				
+				-- Create or get single background texture that spans the whole column
+				local colBackground = _G[talentFrameName.."GridColumn"..colIndex.."Background"];
+				if ( not colBackground ) then
+					colBackground = colFrame:CreateTexture(talentFrameName.."GridColumn"..colIndex.."Background", "BACKGROUND");
+					colBackground:SetDrawLayer("BACKGROUND", -1);
+				end
+				
+				-- Set texture path: "Interface\\FrameGeneral\\SpecBG\\"..background (no -Part suffix)
+				local specBgPath = "Interface\\FrameGeneral\\SpecBG\\"..tabBackground;
+				if ( not tabBackground ) then
+					-- Default fallback
+					specBgPath = "Interface\\FrameGeneral\\SpecBG\\MageFire";
+				end
+				
+				colBackground:SetTexture(specBgPath);
+				colBackground:SetTexCoord(0, 1, 0, 0.639648438);
+				colBackground:ClearAllPoints();
+				colBackground:SetPoint("TOPLEFT", colFrame, "TOPLEFT", 0, 0);
+				colBackground:SetPoint("BOTTOMRIGHT", colFrame, "BOTTOMRIGHT", 0, 0);
+				
+				-- Desaturate if this isn't the active talent group
+				SetDesaturation(colBackground, not isActiveTalentGroup);
+				colBackground:Show();
 				
 				-- Create 4x11 grid of frames within this column if not already created
 				if ( not colFrame.gridFrames ) then
@@ -516,7 +528,7 @@ function TalentFrame_Update(TalentFrame)
 								talentButton:SetID(talentIndex);
 								talentButton:ClearAllPoints();
 								talentButton:SetPoint("CENTER", gridFrame, "CENTER", 0, 0);
-								talentButton:SetSize(32, 32); -- Standard talent button size
+								talentButton:SetSize(28, 28); -- Standard talent button size
 								
 								-- Set backdrop with black border using white8x8 texture
 								talentButton:SetBackdrop({
@@ -1137,7 +1149,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 		
 		local arrow = button:CreateTexture("$parentArrow", "OVERLAY", 10);
 		arrow:SetPoint("CENTER", button, "TOP", 0, 0);
-		arrow:SetSize(32, 32);
+		arrow:SetSize(16, 16);
 		arrow:SetTexture("Interface\\TalentFrame\\UI-TalentArrows");
 		arrow:SetTexCoord(0, 0.5, 0, 0.5);
 		button.prereqTextures.arrow = arrow;
@@ -1154,6 +1166,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 				corner:ClearAllPoints()
 				corner:SetPoint("CENTER", cornerCell, "CENTER")
 				corner:SetTexture("Interface\\FrameGeneral\\branch-corn")
+				corner:SetSize(16, 16)
 				button.prereqTextures.corner = corner;
 
 				arrow:SetPoint("CENTER", button, "TOP", 0, 0)
@@ -1168,6 +1181,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 					branchH:SetTexture("Interface\\FrameGeneral\\branch-hori")
 					branchH:SetHorizTile(true)
 					branchH:SetTexCoord(0, 1, 0, 1)
+					branchH:SetSize(16, 16)
 					button.prereqTextures.branchH = branchH;
 
 					local branchV = button:CreateTexture("$parentBranchV", 'BACKGROUND', -1);
@@ -1176,11 +1190,12 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 					branchV:SetPoint("BOTTOM", button, "TOP", 0, 0)
 					branchV:SetTexture("Interface\\FrameGeneral\\branch-vert")
 					branchV:SetVertTile(true)
+					branchV:SetSize(16, 16)
 					branchV:SetTexCoord(0, 1, 0, 1)
 					button.prereqTextures.branchV = branchV;
 				else
 					corner:SetTexCoord(1, 0, 0, 1)
-					corner:SetSize(32, 32)
+					corner:SetSize(16, 16)
 					
 					local branchH = button:CreateTexture("$parentBranchH", 'BACKGROUND', -1);
 					branchH:ClearAllPoints()
@@ -1189,6 +1204,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 					branchH:SetTexture("Interface\\FrameGeneral\\branch-hori")
 					branchH:SetTexCoord(0, 1, 0, 1)
 					branchH:SetHorizTile(true)
+					branchH:SetSize(16, 16)
 					button.prereqTextures.branchH = branchH;
 
 					local branchV = button:CreateTexture("$parentBranchV", 'BACKGROUND', -1);
@@ -1197,6 +1213,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 					branchV:SetPoint("BOTTOM", arrow, "CENTER", 0, 0)
 					branchV:SetTexture("Interface\\FrameGeneral\\branch-vert")
 					branchV:SetVertTile(true)
+					branchV:SetSize(16, 16)
 					branchV:SetTexCoord(0, 1, 0, 1)
 					button.prereqTextures.branchV = branchV;
 				end
@@ -1210,6 +1227,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 				branch:SetPoint("RIGHT", arrow, "CENTER", 0, 0)
 				branch:SetTexture("Interface\\FrameGeneral\\branch-hori")
 				branch:SetTexCoord(0, 1, 0, 1)
+				branch:SetSize(16, 16)
 				button.prereqTextures.branch = branch;
 			else
 				arrow:SetPoint("CENTER", button, "RIGHT", 0, 0)
@@ -1221,6 +1239,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 				branch:SetPoint("LEFT", arrow, "CENTER", 0, 0)
 				branch:SetTexture("Interface\\FrameGeneral\\branch-hori")
 				branch:SetTexCoord(0, 1, 0, 1)
+				branch:SetSize(16, 16)
 				button.prereqTextures.branch = branch;
 			end
 		else
@@ -1233,6 +1252,7 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 			branch:SetPoint("BOTTOM", arrow, "CENTER", 0, 0)
 			branch:SetTexture("Interface\\FrameGeneral\\branch-vert")
 			branch:SetVertTile(true)
+			branch:SetSize(16, 16)
 			button.prereqTextures.branch = branch;
 		end
 	end

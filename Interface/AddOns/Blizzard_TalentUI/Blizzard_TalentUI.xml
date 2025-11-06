@@ -83,14 +83,14 @@
 	</Button>
 	<Button name="PlayerTalentGridButtonTemplate" virtual="true">
 		<Size>
-			<AbsDimension x="32" y="32"/>
+			<AbsDimension x="28" y="28"/>
 		</Size>
 		<Layers>
 			<Layer level="BACKGROUND">
 				<!-- Icon texture -->
 				<Texture name="$parentIconTexture">
 					<Size>
-						<AbsDimension x="30" y="30"/>
+						<AbsDimension x="26" y="26"/>
 					</Size>
 					<Anchors>
 						<Anchor point="CENTER">

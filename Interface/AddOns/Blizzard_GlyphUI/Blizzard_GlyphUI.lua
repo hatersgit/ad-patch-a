@@ -4,21 +4,6 @@ GLYPHTYPE_MINOR = 2;
 GLYPH_MINOR = { r = 0, g = 0.25, b = 1};
 GLYPH_MAJOR = { r = 1, g = 0.25, b = 0};
 
-GLYPH_SLOTS = {};
--- Empty Texture
-GLYPH_SLOTS[0] = { left = 0.78125, right = 0.91015625, top = 0.69921875, bottom = 0.828125 };
--- Major Glyphs
-GLYPH_SLOTS[3] = { left = 0.392578125, right = 0.521484375, top = 0.87109375, bottom = 1 };
-GLYPH_SLOTS[1] = { left = 0, right = 0.12890625, top = 0.87109375, bottom = 1 };
-GLYPH_SLOTS[5] = { left = 0.26171875, right = 0.390625, top = 0.87109375, bottom = 1 };
--- Minor Glyphs
-GLYPH_SLOTS[2] = { left = 0.130859375, right = 0.259765625, top = 0.87109375, bottom = 1 };
-GLYPH_SLOTS[6] = { left = 0.654296875, right = 0.783203125, top = 0.87109375, bottom = 1 };
-GLYPH_SLOTS[4] = { left = 0.5234375, right = 0.65234375, top = 0.87109375, bottom = 1 };
-
-NUM_GLYPH_SLOTS = 6;
-
--- Mapping of glyph icon IDs to texture paths
 local GLYPH_ICON_TEXTURES = {
 	[3098] = "Interface\\Spellbook\\UI-Glyph-Rune-11",
 	[2681] = "Interface\\Icons\\Creature_sporemushroom",
@@ -44,9 +29,48 @@ local GLYPH_ICON_TEXTURES = {
 	[3110] = "Interface\\Spellbook\\UI-Glyph-Rune-1",
 };
 
--- Default glyph icon ID (3312)
-local DEFAULT_GLYPH_ICON_ID = 3312;
-local DEFAULT_GLYPH_TEXTURE = GLYPH_ICON_TEXTURES[DEFAULT_GLYPH_ICON_ID];
+local function GlyphFrame_GetTextureForIcon(icon)
+	if ( type(icon) == "number" ) then
+		return GLYPH_ICON_TEXTURES[icon];
+	elseif ( type(icon) == "string" and icon ~= "" ) then
+		return icon;
+	end
+	return nil;
+end
+
+GLYPH_SLOTS = {};
+-- Empty Texture
+GLYPH_SLOTS[0] = { left = 0.78125, right = 0.91015625, top = 0.69921875, bottom = 0.828125 };
+-- Major Glyphs
+GLYPH_SLOTS[3] = { left = 0.392578125, right = 0.521484375, top = 0.87109375, bottom = 1 };
+GLYPH_SLOTS[1] = { left = 0, right = 0.12890625, top = 0.87109375, bottom = 1 };
+GLYPH_SLOTS[5] = { left = 0.26171875, right = 0.390625, top = 0.87109375, bottom = 1 };
+-- Minor Glyphs
+GLYPH_SLOTS[2] = { left = 0.130859375, right = 0.259765625, top = 0.87109375, bottom = 1 };
+GLYPH_SLOTS[6] = { left = 0.654296875, right = 0.783203125, top = 0.87109375, bottom = 1 };
+GLYPH_SLOTS[4] = { left = 0.5234375, right = 0.65234375, top = 0.87109375, bottom = 1 };
+
+NUM_GLYPH_SLOTS = 6;
+
+local GLYPH_SOCKET_UNLOCK_LEVELS = {
+	[1] = 15,
+	[2] = 15,
+	[3] = 50,
+	[4] = 30,
+	[5] = 70,
+	[6] = 80,
+};
+
+local function GlyphFrame_GetSocketUnlockLevel(slotIndex, glyphType)
+	if ( type(SpecMap_GetGlyphSocketUnlockLevel) == "function" ) then
+		local level = SpecMap_GetGlyphSocketUnlockLevel(slotIndex);
+		if ( level ) then
+			return level;
+		end
+	end
+	return GLYPH_SOCKET_UNLOCK_LEVELS[slotIndex] or ((glyphType == GLYPHTYPE_MINOR) and 15 or 25);
+end
+
 
 local slotAnimations = {};
 local TOPLEFT, TOP, TOPRIGHT, BOTTOMRIGHT, BOTTOM, BOTTOMLEFT = 3, 1, 5, 4, 2, 6;
@@ -170,54 +194,35 @@ function GlyphFrameGlyph_UpdateSlot (self)
 		end
 	end
 	
-	-- Get glyph spell and icon from SpecMap if using SpecMap
-	-- The base UI uses GetGlyphSocketInfo which returns iconFilename directly from the glyph's spell
-	-- When using SpecMap, we get the icon via GetSpellInfo (same way GetGlyphSocketInfo does internally)
+	-- Get glyph spell from SpecMap if using SpecMap (for tooltip purposes)
 	local specGlyphSpell, specGlyphIcon, specAuthoritative = GlyphFrame_GetSpecMapGlyphInfo(talentGroup, id);
-	if ( specAuthoritative ) then
-		if ( specGlyphSpell ) then
-			-- We have a glyph spell from SpecMap - override both spell and icon
-			glyphSpell = specGlyphSpell;
-			
-			-- Get icon ID from SpecMap and map it to texture path
-			local iconId = nil;
-			if ( type(SpecMap_GetGlyphIconId) == "function" ) then
-				iconId = SpecMap_GetGlyphIconId(talentGroup, id);
-			end
-			
-			if ( iconId and GLYPH_ICON_TEXTURES[iconId] ) then
-				-- Use texture from mapping table
-				iconFilename = GLYPH_ICON_TEXTURES[iconId];
-			elseif ( iconId ) then
-				-- Icon ID exists but not in mapping, use default
-				iconFilename = DEFAULT_GLYPH_TEXTURE;
-			else
-				-- No icon ID from SpecMap - fall back to icon from spell info
-				local _, _, spellIcon = GetSpellInfo(glyphSpell);
-				if ( spellIcon ) then
-					iconFilename = spellIcon;
-				else
-					-- Final fallback: use default texture
-					iconFilename = DEFAULT_GLYPH_TEXTURE;
-				end
-			end
-		else
-			-- Empty socket - no glyph spell, clear both spell and icon (same as base UI)
-			glyphSpell = nil;
-			iconFilename = nil;
-		end
-	else
-		-- Not using SpecMap - use iconFilename from GetGlyphSocketInfo, but only if glyph spell exists
-		if ( not glyphSpell ) then
-			iconFilename = nil;
-		end
-		-- Note: iconFilename from GetGlyphSocketInfo should already be correct if glyphSpell exists
+	if ( specAuthoritative and specGlyphSpell ) then
+		glyphSpell = specGlyphSpell;
+	elseif ( specAuthoritative and not specGlyphSpell ) then
+		glyphSpell = nil;
 	end
 
-	-- Always hide and clear glyph texture initially - only show if glyph is actually slotted
-	-- Do this before SetGlyphType to prevent any default texture from showing
+	local slotTexCoords = GLYPH_SLOTS[id] or GLYPH_SLOTS[0];
+	if ( slotTexCoords ) then
+		self.background:SetTexCoord(slotTexCoords.left, slotTexCoords.right, slotTexCoords.top, slotTexCoords.bottom);
+	end
+
+	local glyphIconTexture = nil;
+	if ( specAuthoritative and specGlyphIcon ) then
+		glyphIconTexture = GlyphFrame_GetTextureForIcon(specGlyphIcon);
+	end
+	if ( not glyphIconTexture ) then
+		glyphIconTexture = GlyphFrame_GetTextureForIcon(iconFilename);
+	end
+
+	local hasGlyph = (glyphSpell and glyphSpell > 0);
+
+	-- Always hide glyph texture (inner rune) - we only show borders
 	self.glyph:Hide();
 	self.glyph:SetTexture(nil);
+	
+	-- Always hide background - we only show borders
+	self.background:Hide();
 
 	local isMinor = glyphType == 2;
 	if ( isMinor ) then
@@ -229,12 +234,12 @@ function GlyphFrameGlyph_UpdateSlot (self)
 	self.elapsed = 0;
 	self.tintElapsed = 0;
 	
-	-- Hide highlight texture - simple saturation is enough
+	-- Hide highlight and setting textures by default (will be shown later if needed)
 	if ( self.highlight ) then
 		self.highlight:Hide();
 	end
 
-	-- Check if viewing active spec - disable animations if viewing inactive spec
+	-- Check if viewing active spec for desaturation
 	local isActiveSpec = false;
 	if ( PlayerTalentFrame and not PlayerTalentFrame.pet and not PlayerTalentFrame.inspect ) then
 		-- Check if selected spec matches active spec
@@ -250,6 +255,7 @@ function GlyphFrameGlyph_UpdateSlot (self)
 	local slotAnimation = slotAnimations[id];
 	
 	if ( not enabled ) then
+		-- Socket is locked - show locked texture
 		slotAnimation.glyph = nil;
 		if ( slotAnimation.sparkle ) then
 			slotAnimation.sparkle:StopAnimating();
@@ -257,86 +263,51 @@ function GlyphFrameGlyph_UpdateSlot (self)
 		end
 		self.shine:Hide();
 		self.background:Hide();
+		self.glyph:Hide();
 		self.ring:Hide();
 		self.setting:SetTexture("Interface\\Spellbook\\UI-GlyphFrame-Locked");
 		self.setting:SetTexCoord(.1, .9, .1, .9);
-	elseif ( not glyphSpell ) then
-		-- Empty socket - no glyph slotted
-		-- Disable animations if viewing inactive spec
-		if ( not isActiveSpec ) then
-			slotAnimation.glyph = nil;
-			if ( slotAnimation.sparkle ) then
-				slotAnimation.sparkle:StopAnimating();
-				slotAnimation.sparkle:Hide();
-			end
-		else
-			slotAnimation.glyph = nil; -- Empty socket doesn't animate
-			if ( slotAnimation.sparkle ) then
-				slotAnimation.sparkle:StopAnimating();
-				slotAnimation.sparkle:Hide();
-			end
-		end
-		self.spell = nil;
-		self.shine:Show();
-		self.background:Show();
-		self.background:SetTexCoord(GLYPH_SLOTS[0].left, GLYPH_SLOTS[0].right, GLYPH_SLOTS[0].top, GLYPH_SLOTS[0].bottom);
-		if ( not GlyphMatchesSocket(id) ) then
-			self.background:SetAlpha(1);
-		end
-		-- Desaturate borders when viewing inactive spec
-		if ( not isActiveSpec ) then
-			SetDesaturation(self.ring, true);
-			SetDesaturation(self.background, true);
-			SetDesaturation(self.setting, true);
-		else
-			SetDesaturation(self.ring, false);
-			SetDesaturation(self.background, false);
-			SetDesaturation(self.setting, false);
-		end
-		-- Ensure glyph texture is hidden and cleared for empty slots
-		self.glyph:Hide();
-		self.glyph:SetTexture(nil);
-		self.ring:Show();
+		-- Tooltip logic is kept in OnEnter handler
 	else
-		-- Glyph is slotted - show the glyph rune texture
-		-- Only enable animations if viewing active spec
-		if ( isActiveSpec ) then
+		-- Socket is unlocked
+		slotAnimation.glyph = nil; -- No animations
+		if ( slotAnimation.sparkle ) then
+			slotAnimation.sparkle:StopAnimating();
+			slotAnimation.sparkle:Hide();
+		end
+		self.spell = glyphSpell; -- Store for tooltip
+		
+		if ( hasGlyph ) then
 			slotAnimation.glyph = true;
-		else
-			slotAnimation.glyph = nil;
-			if ( slotAnimation.sparkle ) then
-				slotAnimation.sparkle:StopAnimating();
-				slotAnimation.sparkle:Hide();
+			-- Glyph is slotted - show both ring and setting
+			self.shine:Show();
+			self.ring:Show();
+			self.setting:SetTexture("Interface\\Spellbook\\UI-GlyphFrame");
+			self.background:Show();
+			self.background:SetAlpha(1);
+			self.background:SetTexCoord(GLYPH_SLOTS[id].left, GLYPH_SLOTS[id].right, GLYPH_SLOTS[id].top, GLYPH_SLOTS[id].bottom);
+			
+			local glyphTexture = glyphIconTexture;
+			if ( glyphTexture ) then
+				self.glyph:SetTexture(glyphTexture);
+				self.glyph:Show();
+			else
+				self.glyph:Hide();
 			end
-		end
-		self.spell = glyphSpell;
-		self.shine:Show();
-		self.background:Show();
-		self.background:SetAlpha(1);
-		self.background:SetTexCoord(GLYPH_SLOTS[id].left, GLYPH_SLOTS[id].right, GLYPH_SLOTS[id].top, GLYPH_SLOTS[id].bottom);
-		-- Only show glyph texture when glyph is actually slotted AND we have an icon
-		-- Double-check that glyphSpell exists (safety check)
-		if ( glyphSpell and iconFilename ) then
-			self.glyph:Show();
-			self.glyph:SetTexture(iconFilename);
+
+			-- Ensure highlight is hidden
+			if ( self.highlight ) then
+				self.highlight:Hide();
+			end
 		else
-			-- No glyph or no icon available - don't show the glyph texture
+			-- No glyph slotted - show only ring texture
+			self.shine:Show();
+			self.ring:Show();
+			self.background:Show();
+			self.background:SetTexCoord(GLYPH_SLOTS[0].left, GLYPH_SLOTS[0].right, GLYPH_SLOTS[0].top, GLYPH_SLOTS[0].bottom);
+			self.background:SetAlpha(1);
 			self.glyph:Hide();
-			self.glyph:SetTexture(nil);
 		end
-		-- Desaturate borders and glyph rune when viewing inactive spec
-		if ( not isActiveSpec ) then
-			SetDesaturation(self.ring, true);
-			SetDesaturation(self.background, true);
-			SetDesaturation(self.setting, true);
-			SetDesaturation(self.glyph, true);
-		else
-			SetDesaturation(self.ring, false);
-			SetDesaturation(self.background, false);
-			SetDesaturation(self.setting, false);
-			SetDesaturation(self.glyph, false);
-		end
-		self.ring:Show();
 	end
 end
 
@@ -378,65 +349,9 @@ function GlyphFrameGlyph_SetGlyphType (glyph, glyphType)
 end
 
 function GlyphFrameGlyph_OnUpdate (self, elapsed)
-	local GLYPHFRAMEGLYPH_FINISHED = 6;
-	local GLYPHFRAMEGLYPH_START = 2;
-	local GLYPHFRAMEGLYPH_HOLD = 4;
-
-	local hasGlyph = self.glyph:IsShown();
-	
-	if ( hasGlyph or self.elapsed > 0 ) then
-		self.elapsed = self.elapsed + elapsed;
-		
-		elapsed = self.elapsed;
-		if ( elapsed >= GLYPHFRAMEGLYPH_FINISHED ) then
-			self.setting:SetAlpha(.6);
-			self.elapsed = 0;
-		elseif ( elapsed <= GLYPHFRAMEGLYPH_START ) then
-			self.setting:SetAlpha(.6 + (.4 * elapsed/GLYPHFRAMEGLYPH_START));
-		elseif ( elapsed >= GLYPHFRAMEGLYPH_HOLD ) then
-			self.setting:SetAlpha(1 - (.4 * (elapsed - GLYPHFRAMEGLYPH_HOLD) / (GLYPHFRAMEGLYPH_FINISHED - GLYPHFRAMEGLYPH_HOLD) ) );
-		end
-	elseif ( self.background:IsShown() ) then
-		self.setting:SetAlpha(.6);
-	else
-		self.setting:SetAlpha(.6);
-	end
-	
-	local TINT_START, TINT_HOLD, TINT_FINISHED = .6, .8, 1.6;
-	
-	local id = self:GetID();
-	if ( not hasGlyph and self.background:IsShown() and GlyphMatchesSocket(id) ) then
-		self.tintElapsed = self.tintElapsed + elapsed;
-		
-		self.background:SetTexCoord(GLYPH_SLOTS[id].left, GLYPH_SLOTS[id].right, GLYPH_SLOTS[id].top, GLYPH_SLOTS[id].bottom);
-		
-		-- Hide highlight texture - simple saturation is enough
-		if ( self.highlight ) then
-			self.highlight:Hide();
-		end
-		
-		local alpha;
-		elapsed = self.tintElapsed;
-		if ( elapsed >= TINT_FINISHED ) then
-			alpha = 1;
-			
-			self.tintElapsed = 0;
-		elseif ( elapsed <= TINT_START ) then
-			alpha = 1 - (.6 * elapsed/TINT_START);
-		elseif ( elapsed >= TINT_HOLD ) then
-			alpha = .4 + (.6 * (elapsed - TINT_HOLD) / (TINT_FINISHED - TINT_HOLD));
-		end
-		
-		if ( alpha ) then
-			self.background:SetAlpha(alpha);
-		end
-	elseif ( not hasGlyph ) then
-		self.background:SetTexCoord(GLYPH_SLOTS[0].left, GLYPH_SLOTS[0].right, GLYPH_SLOTS[0].top, GLYPH_SLOTS[0].bottom);
-		self.background:SetAlpha(1);
-	end
-	
+	-- Simplified: no animations, just handle cursor
 	if ( self.hasCursor and SpellIsTargeting() ) then
-		if ( GlyphMatchesSocket(self:GetID()) and self.background:IsShown() ) then
+		if ( GlyphMatchesSocket(self:GetID()) ) then
 			SetCursor("CAST_CURSOR");
 		else
 			SetCursor("CAST_ERROR_CURSOR");
@@ -500,64 +415,120 @@ end
 
 function GlyphFrameGlyph_OnEnter (self)
 	self.hasCursor = true;
-	-- Hide highlight texture - simple saturation is enough
-	if ( self.highlight ) then
-		self.highlight:Hide();
-	end
 	local talentGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup;
 	local id = self:GetID();
+
+	local enabled, glyphType = GetGlyphSocketInfo(id, talentGroup);
+	local specSocketEnabled = select(1, GlyphFrame_GetSpecMapSocketInfo(id));
+	if ( specSocketEnabled ~= nil ) then
+		enabled = specSocketEnabled;
+	end
+
+	if ( self.highlight ) then
+		if ( enabled ) then
+			local isActiveSpec = false;
+			if ( PlayerTalentFrame and not PlayerTalentFrame.pet and not PlayerTalentFrame.inspect ) then
+				if ( type(selectedSpecNumber) == "number" and type(activeSpecNumber) == "number" ) then
+					isActiveSpec = (selectedSpecNumber == activeSpecNumber);
+				else
+					local activeGroup = GetActiveTalentGroup(PlayerTalentFrame.inspect, PlayerTalentFrame.pet);
+					isActiveSpec = (PlayerTalentFrame.talentGroup == activeGroup);
+				end
+			end
+			if ( isActiveSpec ) then
+				self.highlight:SetVertexColor(1, 1, 1);
+				self.highlight:SetAlpha(HIGHLIGHT_BASEALPHA);
+			else
+				self.highlight:SetVertexColor(0.6, 0.6, 0.6);
+				self.highlight:SetAlpha(HIGHLIGHT_BASEALPHA * 0.75);
+			end
+			self.highlight:Show();
+		else
+			self.highlight:Hide();
+		end
+	end
 	
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-	
-	-- Check if we should use SpecMap
-	local useSpecMap = GlyphFrame_ShouldUseSpecMap();
-	if ( useSpecMap ) then
-		local glyphSpell, _, specAuthoritative = GlyphFrame_GetSpecMapGlyphInfo(talentGroup, id);
-		-- If we have a glyph spell from SpecMap, show it
-		if ( specAuthoritative and glyphSpell and glyphSpell > 0 ) then
-			GameTooltip:SetHyperlink(GetSpellLink(glyphSpell));
-			GameTooltip:Show();
+ 
+	local enabled, glyphType, glyphSpell = GetGlyphSocketInfo(id, talentGroup);
+	local specSocketEnabled, specGlyphType = GlyphFrame_GetSpecMapSocketInfo(id);
+	if ( specSocketEnabled ~= nil ) then
+		enabled = specSocketEnabled;
+	end
+	if ( specGlyphType ~= nil ) then
+		glyphType = specGlyphType;
+	end
+	if ( not glyphType and id and id >= 1 and id <= NUM_GLYPH_SLOTS ) then
+		if ( id == 1 or id == 4 or id == 6 ) then
+			glyphType = GLYPHTYPE_MAJOR;
 		else
-			-- For empty/locked sockets with SpecMap, we need to show tooltip manually
-			-- Get socket info from SpecMap cache
-			local enabled, glyphType = GlyphFrame_GetSpecMapSocketInfo(id);
-			if ( enabled ~= nil and glyphType ~= nil ) then
-				local socketName = (glyphType == 2) and "Minor Glyph" or "Major Glyph";
-				GameTooltip:SetText(socketName);
-				if ( not enabled ) then
-					local unlockLevel = nil;
-					if ( type(SpecMap_GetGlyphSocketUnlockLevel) == "function" ) then
-						unlockLevel = SpecMap_GetGlyphSocketUnlockLevel(id);
-					else
-						-- Fallback levels (base WoW 3.3.5 pattern)
-						-- Slot 1 (Major): 15, Slot 2 (Minor): 15, Slot 3 (Minor): 50, 
-						-- Slot 4 (Major): 30, Slot 5 (Minor): 70, Slot 6 (Major): 80
-						local fallbackLevels = {
-							[1] = 15, -- Major slot 1
-							[2] = 15, -- Minor slot 1
-							[3] = 50, -- Minor slot 2
-							[4] = 30, -- Major slot 2
-							[5] = 70, -- Minor slot 3
-							[6] = 80, -- Major slot 3
-						};
-						unlockLevel = fallbackLevels[id] or ((glyphType == 2) and 15 or 25);
+			glyphType = GLYPHTYPE_MINOR;
+		end
+	end
+
+	local specGlyphSpell, _, specAuthoritative = GlyphFrame_GetSpecMapGlyphInfo(talentGroup, id);
+	if ( specAuthoritative ) then
+		glyphSpell = specGlyphSpell or 0;
+	end
+
+	local glyphTypeText = (glyphType == GLYPHTYPE_MINOR) and "Minor Glyph" or "Major Glyph";
+	local hasGlyph = (glyphSpell and glyphSpell > 0);
+
+	GameTooltip:ClearLines();
+
+	if ( not enabled ) then
+		GameTooltip:AddLine("Locked", 1, 0, 0);
+		GameTooltip:AddLine(glyphTypeText, 0.6, 0.8, 1);
+		local unlockLevel = GlyphFrame_GetSocketUnlockLevel(id, glyphType);
+		if ( unlockLevel ) then
+			GameTooltip:AddLine(string.format("Unlocked at level %d.", unlockLevel), 1, 0.82, 0);
+		end
+		GameTooltip:Show();
+		return;
+	end
+
+	if ( hasGlyph ) then
+		local link = GetSpellLink(glyphSpell);
+		if ( link ) then
+			GameTooltip:SetHyperlink(link);
+		else
+			GameTooltip:SetGlyph(id, talentGroup);
+		end
+		local descText, descR, descG, descB;
+		local numLines = GameTooltip:NumLines();
+		if ( numLines >= 2 ) then
+			local descLine = _G["GameTooltipTextLeft2"];
+			if ( descLine ) then
+				descText = descLine:GetText();
+				descR, descG, descB = descLine:GetTextColor();
+				if ( descText and descText ~= "" ) then
+					for lineIndex = 2, numLines - 1 do
+						local currentLine = _G["GameTooltipTextLeft" .. lineIndex];
+						local nextLine = _G["GameTooltipTextLeft" .. (lineIndex + 1)];
+						if ( currentLine and nextLine ) then
+							local nextText = nextLine:GetText();
+							currentLine:SetText(nextText);
+							local nr, ng, nb = nextLine:GetTextColor();
+							currentLine:SetTextColor(nr, ng, nb);
+						end
 					end
-					if ( unlockLevel ) then
-						GameTooltip:AddLine("Unlocks at level " .. unlockLevel, 1, 1, 1);
+					local lastLine = _G["GameTooltipTextLeft" .. numLines];
+					if ( lastLine ) then
+						lastLine:SetText("");
 					end
-				elseif ( not glyphSpell ) then
-					GameTooltip:AddLine("Empty " .. socketName .. " Socket", 0.5, 0.5, 0.5);
 				end
-				GameTooltip:Show();
-			else
-				-- Fallback to base game API
-				GameTooltip:SetGlyph(id, talentGroup);
-				GameTooltip:Show();
 			end
 		end
+		GameTooltip:AddLine(glyphTypeText, 0.6, 0.8, 1);
+		if ( descText and descText ~= "" ) then
+			GameTooltip:AddLine(descText, descR or 1, descG or 1, descB or 1);
+		end
+		GameTooltip:AddLine("<Shift Right Click to Remove>", 0.6, 0.6, 0.6);
+		GameTooltip:Show();
 	else
-		-- Not using SpecMap, use base game API
-		GameTooltip:SetGlyph(id, talentGroup);
+		GameTooltip:AddLine("Empty", 0.6, 0.6, 0.6);
+		GameTooltip:AddLine(glyphTypeText, 0.6, 0.8, 1);
+		GameTooltip:AddLine("Use a Glyph from your inventory to inscribe your spellbook.", 1, 0.82, 0);
 		GameTooltip:Show();
 	end
 end
@@ -584,14 +555,15 @@ end
 
 function GlyphFrame_PulseGlow ()
 	-- Disabled glow pulse animation to improve FPS
-	-- GlyphFrame.glow:Show();
-	-- GlyphFrame.glow.pulse:Play();
+	GlyphFrame.glow:Show();
+	GlyphFrame.glow.pulse:Play();
 end
 
 function GlyphFrame_OnShow (self)
 	PlayerTalentFrameControlBar:Hide();
 	PlayerTalentFrameControlBarResetButton:Hide();
 	PlayerTalentFrameControlBarLearnButton:Hide();
+	
 	GlyphFrame_Update();
 end
 
@@ -599,8 +571,8 @@ function GlyphFrame_OnLoad (self)
 	local name = self:GetName();
 	self.background = _G[name .. "Background"];
 	self.sparkleFrame = SparkleFrame:New(self);
-	-- Set initial scale to match PlayerTalentFrame default scale (0.75)
-	self:SetScale(0.75);
+	-- Set scale to baseline (1.0) to match PlayerTalentFrame and ensure proper alignment
+	self:SetScale(1.0);
 	self:RegisterEvent("ADDON_LOADED");
 	self:RegisterEvent("GLYPH_ADDED");
 	self:RegisterEvent("GLYPH_REMOVED");
