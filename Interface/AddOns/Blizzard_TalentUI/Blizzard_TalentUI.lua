@@ -1413,6 +1413,11 @@ function PlayerTalentFrame_ShowGlyphFrame()
 		else
 			GlyphFrame:Show();
 		end
+		
+		-- Increase scale by 50% when viewing glyphs (0.80 * 1.5 = 1.20)
+		-- Set scale after frame is shown/updated to ensure it's not overridden
+		PlayerTalentFrame:SetScale(1.20);
+
 		-- don't forget to hide the scroll button overlay or it may show up on top of the GlyphFrame!
 		UIFrameFlashStop(PlayerTalentFrameScrollButtonOverlay);
 		
@@ -1426,6 +1431,9 @@ function PlayerTalentFrame_ShowGlyphFrame()
 		if ( type(PlayerTalentFrame_UpdateControls) == "function" ) then
 			PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups);
 		end
+		
+		-- Ensure scale is maintained after controls update (in case they reset it)
+		PlayerTalentFrame:SetScale(1.20);
 		
 		-- Update glyph title text when switching specs
 		if ( GlyphFrame and GlyphFrame:IsShown() and GlyphFrameTitleText ) then
@@ -1450,6 +1458,13 @@ function PlayerTalentFrame_HideGlyphFrame()
 	if ( GlyphFrame ) then
 		GlyphFrame:Hide();
 	end
+	
+	-- Revert scale back to 0.75 when hiding glyphs
+	PlayerTalentFrame:SetScale(0.80);
+	if ( GlyphFrame ) then
+		GlyphFrame:SetScale(0.80);
+	end
+	
 	-- Show the talent frame title text when hiding glyphs
 	if ( PlayerTalentFrameTitleText ) then
 		PlayerTalentFrameTitleText:Show();
@@ -1459,7 +1474,7 @@ end
 
 function PlayerTalentFrame_OnLoad(self)
 	-- Check UIParent's effective scale and adjust PlayerTalentFrame scale accordingly
-	self:SetScale(0.75);
+	self:SetScale(0.80);
 	
 	-- Create backdrop frame with black background (0.55 alpha) at specified points
 	local backdropFrame = CreateFrame("Frame", "PlayerTalentFrameBackdrop", self);
@@ -1855,6 +1870,10 @@ function PlayerTalentFrame_Refresh()
 	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
 	if ( selectedTab == GLYPH_TALENT_TAB ) then
 		PlayerTalentFrame_ShowGlyphFrame();
+		-- Ensure scale is maintained after ShowGlyphFrame (in case it gets reset)
+		if ( GlyphFrame and GlyphFrame:IsShown() ) then
+			PlayerTalentFrame:SetScale(1.20);
+		end
 		-- Update controls for glyph view (ShowGlyphFrame already calls this, but ensure it's called)
 		local activeTalentGroup;
 		local numTalentGroups;
@@ -1867,6 +1886,10 @@ function PlayerTalentFrame_Refresh()
 		end
 		if ( type(PlayerTalentFrame_UpdateControls) == "function" ) then
 			PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups);
+		end
+		-- Ensure scale is maintained after controls update when viewing glyphs
+		if ( GlyphFrame and GlyphFrame:IsShown() ) then
+			PlayerTalentFrame:SetScale(1.20);
 		end
 	else
 		PlayerTalentFrame_HideGlyphFrame();
@@ -1895,6 +1918,20 @@ function PlayerTalentFrame_Refresh()
 	end
 	
 	TalentFrame_Update(PlayerTalentFrame);
+	
+	-- Final scale check: ensure scale is correct based on glyph frame visibility
+	-- This must be after TalentFrame_Update as it may reset the scale
+	if ( GlyphFrame and GlyphFrame:IsShown() ) then
+		-- Glyph frame is shown: scale should be 1.20 (50% increase from 0.80)
+		PlayerTalentFrame:SetScale(1.20);
+		GlyphFrame:SetScale(1);
+	else
+		-- Talent view: scale should be 0.80
+		PlayerTalentFrame:SetScale(0.80);
+		if ( GlyphFrame ) then
+			GlyphFrame:SetScale(0.80);
+		end
+	end
 end
 
 function PlayerTalentFrame_Update(playerLevel)

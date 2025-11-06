@@ -585,21 +585,45 @@ function TalentFrame_Update(TalentFrame)
 									end);
 								end
 
-								DrawGridPrereqs(talentButton, talentIndex, tabIndex)
-								
-								gridFrame.talent = talentButton; -- Store talent button directly on the grid frame
+								-- Don't draw prerequisite lines here - wait until all cells are created
+								-- Store talent button directly on the grid frame for later prerequisite line drawing
+								gridFrame.talent = talentButton;
 							else
 								gridFrame.talent = nil; -- No talent at this position
 							end
 						end
 					end
+			end
+		end
+	end
+	
+	-- Now that all cells are created, draw prerequisite lines for all talent buttons
+	if ( renderAllTabs ) then
+		for colIndex = 1, 3 do
+			local colFrame = _G[talentFrameName.."GridColumn"..colIndex];
+			if ( colFrame and colFrame.gridFrames ) then
+				local tabIndex = colIndex; -- Column index corresponds to tab index
+				local numTalents = GetNumTalents(tabIndex, TalentFrame.inspect, TalentFrame.pet);
+				
+				-- Iterate through all grid cells and draw prerequisites for cells with talents
+				for gridRow = 1, 11 do
+					for gridCol = 1, 4 do
+						local gridFrame = colFrame.gridFrames[gridRow][gridCol];
+						if ( gridFrame and gridFrame.talent ) then
+							local talentButton = gridFrame.talent;
+							local talentIndex = talentButton:GetID();
+							-- Draw prerequisite lines now that all cells exist
+							DrawGridPrereqs(talentButton, talentIndex, tabIndex);
+						end
+					end
 				end
 			end
 		end
+	end
 		
-		-- Update all grid talent buttons with desaturation and rank text
-		if ( not TalentFrame.inspect and not TalentFrame.pet ) then
-			local talentFrameName = TalentFrame:GetName();
+	-- Update all grid talent buttons with desaturation and rank text
+	if ( not TalentFrame.inspect and not TalentFrame.pet ) then
+		local talentFrameName = TalentFrame:GetName();
 			
 			-- Get unspent points (calculate once for all columns)
 			local unspentPoints = TalentFrame_UpdateTalentPoints(TalentFrame);
@@ -1100,6 +1124,17 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 	button.prereqTextures = button.prereqTextures or {};
 
 	if ( prereqColumn and prereqTier ) then
+		-- Ensure the prerequisite cell exists
+		if ( not colFrame.gridFrames or not colFrame.gridFrames[prereqTier] or not colFrame.gridFrames[prereqTier][prereqColumn] ) then
+			return; -- Prerequisite cell doesn't exist yet, skip drawing
+		end
+		
+		local reqCell = colFrame.gridFrames[prereqTier][prereqColumn];
+		-- Ensure the prerequisite cell has a talent button
+		if ( not reqCell.talent ) then
+			return; -- Prerequisite talent button doesn't exist, skip drawing
+		end
+		
 		local arrow = button:CreateTexture("$parentArrow", "OVERLAY", 10);
 		arrow:SetPoint("CENTER", button, "TOP", 0, 0);
 		arrow:SetSize(32, 32);
@@ -1107,10 +1142,13 @@ function DrawGridPrereqs(button, talentIndex, tabIndex)
 		arrow:SetTexCoord(0, 0.5, 0, 0.5);
 		button.prereqTextures.arrow = arrow;
 
-		local reqCell = colFrame.gridFrames[prereqTier][prereqColumn];
 		if ( prereqColumn ~= column ) then
 			if ( prereqTier ~= tier ) then
 				-- requires corner
+				-- Ensure corner cell exists
+				if ( not colFrame.gridFrames or not colFrame.gridFrames[prereqTier] or not colFrame.gridFrames[prereqTier][column] ) then
+					return; -- Corner cell doesn't exist, skip drawing
+				end
 				local cornerCell = colFrame.gridFrames[prereqTier][column];
 				local corner = button:CreateTexture("$parentCorner", 'BACKGROUND', -1);
 				corner:ClearAllPoints()

@@ -599,6 +599,8 @@ function GlyphFrame_OnLoad (self)
 	local name = self:GetName();
 	self.background = _G[name .. "Background"];
 	self.sparkleFrame = SparkleFrame:New(self);
+	-- Set initial scale to match PlayerTalentFrame default scale (0.75)
+	self:SetScale(0.75);
 	self:RegisterEvent("ADDON_LOADED");
 	self:RegisterEvent("GLYPH_ADDED");
 	self:RegisterEvent("GLYPH_REMOVED");
