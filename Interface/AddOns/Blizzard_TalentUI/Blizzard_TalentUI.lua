@@ -13,7 +13,7 @@ local function SpecMap_GetTalentTierFromGame(talentGroup, tabIndex, talentId)
 			linkTalentId = tonumber(string.match(link, "Htalent:(%d+)") or string.match(link, "talent:(%d+)"));
 		end
 		if ( linkTalentId == talentId ) then
-			local _, _, tier = GetTalentInfo(tabIndex, index, false, false, talentGroup);
+			local _, _, tier = GetTalentInfo(tabIndex, index, false, false, 1);
 			return tier;
 		end
 	end
@@ -351,12 +351,12 @@ function SpecMap_BuildTalentCache()
 			-- Get all talents in this tab using base game API
 			local numTalents = GetNumTalents(tabId, false, false);
 			for talentIndex = 1, numTalents do
-				local talentLink = GetTalentLink(tabId, talentIndex, false, false, talentGroup, false);
+				local talentLink = GetTalentLink(tabId, talentIndex, false, false, 1, false);
 				if ( talentLink ) then
 					local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 					if ( talentId ) then
 						-- Get talent info
-						local name, iconTexture, tier, column = GetTalentInfo(tabId, talentIndex, false, false, talentGroup);
+						local name, iconTexture, tier, column = GetTalentInfo(tabId, talentIndex, false, false, 1);
 						
 						-- Initialize or get existing details
 						local details = tabCache.talentDetails[talentId];
@@ -375,12 +375,12 @@ function SpecMap_BuildTalentCache()
 						end
 						
 						-- Get prerequisite information
-						local prereqTier, prereqColumn = GetTalentPrereqs(tabId, talentIndex, false, false, talentGroup);
+						local prereqTier, prereqColumn = GetTalentPrereqs(tabId, talentIndex, false, false, 1);
 						if ( prereqTier and prereqColumn ) then
 							-- Find the prerequisite talent at this tier/column
 							local prereqTalentIndex = nil;
 							for i = 1, numTalents do
-								local prereqName, prereqIcon, prereqTierCheck, prereqColumnCheck = GetTalentInfo(tabId, i, false, false, talentGroup);
+								local prereqName, prereqIcon, prereqTierCheck, prereqColumnCheck = GetTalentInfo(tabId, i, false, false, 1);
 								if ( prereqTierCheck == prereqTier and prereqColumnCheck == prereqColumn ) then
 									prereqTalentIndex = i;
 									break;
@@ -389,10 +389,10 @@ function SpecMap_BuildTalentCache()
 							
 							-- Get the prerequisite talent ID and max rank
 							if ( prereqTalentIndex ) then
-								local prereqTalentLink = GetTalentLink(tabId, prereqTalentIndex, false, false, talentGroup, false);
+								local prereqTalentLink = GetTalentLink(tabId, prereqTalentIndex, false, false, 1, false);
 								if ( prereqTalentLink ) then
 									local prereqTalentId = SpecMap_TalentCacheExtractTalentID(prereqTalentLink);
-									local _, _, _, _, _, maxRank = GetTalentInfo(tabId, prereqTalentIndex, false, false, talentGroup);
+									local _, _, _, _, _, maxRank = GetTalentInfo(tabId, prereqTalentIndex, false, false, 1);
 									
 									-- Store prerequisite info (required rank is always the max rank)
 									if ( prereqTalentId and maxRank ) then
@@ -669,7 +669,7 @@ function SpecMap_TalentCacheCheckPrereqs(talentGroup, tabIndex, talentId, tier)
 							local talentIndex = nil;
 							local numTalents = GetNumTalents(tabIndex, false, false);
 							for i = 1, numTalents do
-								local talentLink = GetTalentLink(tabIndex, i, false, false, talentGroup, false);
+								local talentLink = GetTalentLink(tabIndex, i, false, false, 1, false);
 								if ( talentLink ) then
 									local linkTalentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 									if ( linkTalentId == talentId ) then
@@ -679,21 +679,21 @@ function SpecMap_TalentCacheCheckPrereqs(talentGroup, tabIndex, talentId, tier)
 								end
 							end
 							if ( talentIndex ) then
-								local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, false, false, talentGroup);
+								local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, false, false, 1);
 								if ( prereqTier and prereqColumn ) then
 									local prereqTalentIndex = nil;
 									for i = 1, numTalents do
-										local name, iconTexture, tier, col = GetTalentInfo(tabIndex, i, false, false, talentGroup);
+										local name, iconTexture, tier, col = GetTalentInfo(tabIndex, i, false, false, 1);
 										if ( tier == prereqTier and col == prereqColumn ) then
 											prereqTalentIndex = i;
 											break;
 										end
 									end
 									if ( prereqTalentIndex ) then
-										local prereqTalentLink = GetTalentLink(tabIndex, prereqTalentIndex, false, false, talentGroup, false);
+										local prereqTalentLink = GetTalentLink(tabIndex, prereqTalentIndex, false, false, 1, false);
 										if ( prereqTalentLink ) then
 											local prereqTalentId = SpecMap_TalentCacheExtractTalentID(prereqTalentLink);
-											local _, _, _, _, _, maxRank = GetTalentInfo(tabIndex, prereqTalentIndex, false, false, talentGroup);
+											local _, _, _, _, _, maxRank = GetTalentInfo(tabIndex, prereqTalentIndex, false, false, 1);
 											if ( prereqTalentId and maxRank ) then
 												details.prereqTalentId = prereqTalentId;
 												details.prereqRank = maxRank; -- Required rank is always the maximum rank
@@ -2125,7 +2125,7 @@ function PlayerTalentFrameTalent_OnEnter(self)
 			local currentRank = SpecMap_TalentCacheGetRank(talentGroup, tabIndex, talentId) or 0;
 			
 			-- Get talent name for the link
-			local talentName = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, talentGroup);
+			local talentName = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, 1);
 			
 			if ( talentName and currentRank > 0 ) then
 				-- Construct hyperlink with correct rank
