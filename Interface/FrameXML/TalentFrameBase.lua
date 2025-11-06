@@ -82,6 +82,36 @@ local max = max;
 local huge = math.huge;
 local rshift = bit.rshift;
 
+if ( type(SpecMap_IsUsingCustomTalents) ~= "function" ) then
+	function SpecMap_IsUsingCustomTalents()
+		if ( type(SpecMap) == "table" ) then
+			if ( type(SpecMap.useCustomTalents) == "boolean" ) then
+				return SpecMap.useCustomTalents;
+			end
+			if ( type(SpecMap.specs) == "table" ) then
+				for _, specData in pairs(SpecMap.specs) do
+					if ( specData ~= nil ) then
+						return true;
+					end
+				end
+			end
+		end
+		return false;
+	end
+end
+
+if ( type(SpecMap_ResolveTalentGroupForBaseAPI) ~= "function" ) then
+	function SpecMap_ResolveTalentGroupForBaseAPI(talentGroup)
+		if ( SpecMap_IsUsingCustomTalents() ) then
+			if ( type(talentGroup) == "number" and talentGroup >= 1 ) then
+				return talentGroup;
+			end
+			return 1;
+		end
+		return 1;
+	end
+end
+
 function ClearBaseTextures(object)
 	if object:IsObjectType("Texture") then
 		if kill then
@@ -191,7 +221,7 @@ function TalentFrame_Update(TalentFrame)
 			displayTab = selectedTab; -- Use selected tab if it's a talent tab
 		end
 	end
-	local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(displayTab, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+	local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(displayTab, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 	
 	if ( not TalentFrame.inspect and not TalentFrame.pet ) then
 		if ( type(SpecMap_TalentCacheApplyTabPoints) == "function" ) then
@@ -372,7 +402,7 @@ function TalentFrame_Update(TalentFrame)
 				colFrame:Show();
 				
 				-- Get background info for this column's talent tree
-				local tabName, tabIcon, tabPointsSpent, tabBackground = GetTalentTabInfo(colIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+				local tabName, tabIcon, tabPointsSpent, tabBackground = GetTalentTabInfo(colIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 				local treeBase = "Interface\\TalentFrame\\MageFire-"; -- Default fallback
 				if ( tabBackground ) then
 					treeBase = "Interface\\TalentFrame\\"..tabBackground.."-";
@@ -513,7 +543,7 @@ function TalentFrame_Update(TalentFrame)
 							local talentIndex = nil;
 							local talentIconTexture = nil;
 							for i = 1, numTalents do
-								local name, iconTexture, tier, column = GetTalentInfo(tabIndex, i, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+								local name, iconTexture, tier, column = GetTalentInfo(tabIndex, i, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 								if ( name and tier == gridRow and column == gridCol ) then
 									talentIndex = i;
 									talentIconTexture = iconTexture;
@@ -560,8 +590,8 @@ function TalentFrame_Update(TalentFrame)
 										GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
 										
 										local talentIndex = self:GetID();
-										local talentGroup = TalentFrame.talentGroup;
-										local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, talentGroup, false);
+										local talentGroup = SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup);
+										local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), GetCVarBool("previewTalents"));
 										
 										-- For player talents, get the current rank from SpecMap cache
 										if ( not TalentFrame.inspect and not TalentFrame.pet and type(SpecMap_TalentCacheExtractTalentID) == "function" ) then
@@ -667,7 +697,7 @@ function TalentFrame_Update(TalentFrame)
 							tabPointsSpent = cachePoints;
 						end
 					else
-						local _, _, pointsSpent = GetTalentTabInfo(tabIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+						local _, _, pointsSpent = GetTalentTabInfo(tabIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 						tabPointsSpent = pointsSpent or 0;
 					end
 					
@@ -680,11 +710,11 @@ function TalentFrame_Update(TalentFrame)
 								local talentIndex = talentButton:GetID();
 								
 								-- Get talent info (rank from GetTalentInfo is ignored, we use SpecMap cache)
-								local name, iconTexture, tier, column, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+								local name, iconTexture, tier, column, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 								if ( name and tier and column and maxRank ) then
 									-- Get talent ID from talent link
 									local talentID = nil;
-									local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+									local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), GetCVarBool("previewTalents"));
 									if ( type(talentLink) == "string" ) then
 										talentID = tonumber(string.match(talentLink, "Htalent:(%d+)") or string.match(talentLink, "talent:(%d+)"));
 									end
@@ -696,7 +726,7 @@ function TalentFrame_Update(TalentFrame)
 											GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
 											
 											local talentIndex = self:GetID();
-											local talentGroup = TalentFrame.talentGroup;
+											local talentGroup = SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup);
 											local baseLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, talentGroup, false);
 											
 											-- For player talents, get the current rank from SpecMap cache
@@ -786,7 +816,7 @@ function TalentFrame_Update(TalentFrame)
 			if ( tabIndex <= numTabs ) then
 				-- Always add tabs 1-3 for player talents, even if GetTalentTabInfo fails
 				-- The function might fail for inactive tabs, but we still want to render them
-				local tabName = GetTalentTabInfo(tabIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+				local tabName = GetTalentTabInfo(tabIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 				table.insert(tabsToRender, tabIndex);
 			end
 		end
@@ -930,11 +960,11 @@ function TalentFrame_Update(TalentFrame)
 			if ( button ) then
 				-- Set the button info
 				local name, iconTexture, tier, column, rank, maxRank, isExceptional, meetsPrereq, previewRank, meetsPreviewPrereq =
-					GetTalentInfo(currentTab, i, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+					GetTalentInfo(currentTab, i, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 				local meetsSpecMapPrereq = true;
 				if ( name and not TalentFrame.inspect and not TalentFrame.pet and type(SpecMap_TalentCacheCheckPrereqs) == "function" ) then
 					local talentID;
-					local talentLink = GetTalentLink(currentTab, i, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+					local talentLink = GetTalentLink(currentTab, i, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), GetCVarBool("previewTalents"));
 					if ( type(talentLink) == "string" ) then
 						talentID = tonumber(string.match(talentLink, "Htalent:(%d+)") or string.match(talentLink, "talent:(%d+)") );
 					end
@@ -944,7 +974,7 @@ function TalentFrame_Update(TalentFrame)
 					local baseRank = rank or 0;
 					if ( not TalentFrame.inspect and not TalentFrame.pet and type(SpecMap_GetTalentRank) == "function" ) then
 						local talentID;
-						local talentLink = GetTalentLink(currentTab, i, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+						local talentLink = GetTalentLink(currentTab, i, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), GetCVarBool("previewTalents"));
 						if ( type(talentLink) == "string" ) then
 							talentID = tonumber(string.match(talentLink, "Htalent:(%d+)") or string.match(talentLink, "talent:(%d+)") );
 						end
@@ -992,7 +1022,7 @@ function TalentFrame_Update(TalentFrame)
 				if (TalentFrame.pet) then
 					local prereqsSet =
 					TalentFrame_SetPrereqs(TalentFrame, tier, column, forceDesaturated, tierUnlocked, preview,
-					GetTalentPrereqs(currentTab, i, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup));
+					GetTalentPrereqs(currentTab, i, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup)));
 					if ( prereqsSet and ( (preview and meetsPreviewPrereq) or (not preview and meetsPrereq)) ) then
 						SetItemButtonDesaturated(button, nil);
 
@@ -1128,7 +1158,7 @@ end
 
 function DrawGridPrereqs(button, talentIndex, tabIndex)
 	local TalentFrame = PlayerTalentFrame;
-	local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+	local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 	local name, iconTexture, tier, column = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
 	local colFrame = _G["PlayerTalentFrameGridColumn"..tabIndex]
 
@@ -1470,9 +1500,9 @@ function TalentFrame_UpdateTalentPoints(TalentFrame)
 	if ( not TalentFrame.inspect and not TalentFrame.pet and type(SpecMap_GetFreeTalentPoints) == "function" ) then
 		talentPoints = SpecMap_GetFreeTalentPoints();
 	else
-		talentPoints = GetUnspentTalentPoints(TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+		talentPoints = GetUnspentTalentPoints(TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 	end
-	local unspentPoints = talentPoints - GetGroupPreviewTalentPointsSpent(TalentFrame.pet, TalentFrame.talentGroup);
+	local unspentPoints = talentPoints - GetGroupPreviewTalentPointsSpent(TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 	local talentFrameName = TalentFrame:GetName();
 	_G[talentFrameName.."TalentPointsText"]:SetFormattedText(UNSPENT_TALENT_POINTS, HIGHLIGHT_FONT_COLOR_CODE..unspentPoints..FONT_COLOR_CODE_CLOSE);
 	TalentFrame_ResetBranches(TalentFrame);
@@ -1673,7 +1703,7 @@ function HandlePlayerTalentButtonClick(self, button, TalentFrame)
 	if ( IsModifiedClick("CHATLINK") ) then
 		local tabIndex = self.tabIndex;
 		local talentIndex = self:GetID();
-		local link = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup, true);
+		local link = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), true);
 		-- Debug: Print raw talent hyperlink
 		if ( link ) then
 			print("DEBUG: Raw talent hyperlink (HandlePlayerTalentButtonClick):", link);
@@ -1692,7 +1722,7 @@ function HandlePlayerTalentButtonClick(self, button, TalentFrame)
 	
 	local tabIndex = self.tabIndex;
 	local talentIndex = self:GetID();
-	local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup, GetCVarBool("previewTalents"));
+	local talentLink = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), true);
 	local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 	
 	if ( not talentId ) then
@@ -1700,7 +1730,7 @@ function HandlePlayerTalentButtonClick(self, button, TalentFrame)
 	end
 	
 	if ( button == "LeftButton" ) then
-		local _, _, tier, column, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+		local _, _, tier, column, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 		local isAvailable = SpecMap_TalentCacheIsTalentAvailable(TalentFrame.talentGroup, tabIndex, talentId, tier);
 		local freeTalents = SpecMap_TalentCacheGetFreeTalents();
 		if ( isAvailable and (freeTalents == nil or freeTalents > 0) and SpecMap_TalentCacheAdjustRank(TalentFrame.talentGroup, tabIndex, talentId, 1, maxRank, tier) ) then
@@ -1715,7 +1745,7 @@ function HandlePlayerTalentButtonClick(self, button, TalentFrame)
 			end
 		end
 	elseif ( button == "RightButton" ) then
-		local _, _, tier, _, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, TalentFrame.talentGroup);
+		local _, _, tier, _, _, maxRank = GetTalentInfo(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup));
 		
 		-- Get current rank from cache (includes user changes)
 		local currentRank = SpecMap_TalentCacheGetRank(TalentFrame.talentGroup, tabIndex, talentId);

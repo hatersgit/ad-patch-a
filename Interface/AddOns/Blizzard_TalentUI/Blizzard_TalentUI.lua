@@ -1,19 +1,29 @@
 local SpecMapTalentCache;
 local SpecMap_TalentCacheEnsureReady;
 
+function ResolveBaseTalentGroup(talentGroup)
+	if ( type(SpecMap_ResolveTalentGroupForBaseAPI) == "function" ) then
+		return SpecMap_ResolveTalentGroupForBaseAPI(talentGroup);
+	end
+	if ( type(talentGroup) == "number" and talentGroup >= 1 ) then
+		return talentGroup;
+	end
+	return 1;
+end
+
 local function SpecMap_GetTalentTierFromGame(talentGroup, tabIndex, talentId)
 	if ( not talentId ) then
 		return nil;
 	end
 	local numTalents = GetNumTalents(tabIndex, false, false);
 	for index = 1, numTalents do
-		local link = GetTalentLink(tabIndex, index, false, false, talentGroup);
+		local link = GetTalentLink(tabIndex, index, false, false, ResolveBaseTalentGroup(talentGroup));
 		local linkTalentId = nil;
 		if ( type(link) == "string" ) then
 			linkTalentId = tonumber(string.match(link, "Htalent:(%d+)") or string.match(link, "talent:(%d+)"));
 		end
 		if ( linkTalentId == talentId ) then
-			local _, _, tier = GetTalentInfo(tabIndex, index, false, false, 1);
+			local _, _, tier = GetTalentInfo(tabIndex, index, false, false, ResolveBaseTalentGroup(talentGroup));
 			return tier;
 		end
 	end
@@ -54,7 +64,7 @@ local function EncodeTalentLearnMessage(talentGroup)
 			-- Get all talents in this tab using base game API to get full details
 			local numTalents = GetNumTalents(tabIndex, false, false);
 			for talentIndex = 1, numTalents do
-				local talentLink = GetTalentLink(tabIndex, talentIndex, false, false, talentGroup, false);
+				local talentLink = GetTalentLink(tabIndex, talentIndex, false, false, ResolveBaseTalentGroup(talentGroup), false);
 				if ( talentLink ) then
 					local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 					if ( talentId ) then
@@ -333,6 +343,7 @@ function SpecMap_BuildTalentCache()
 	-- This ensures prerequisite checking works even for talents not in the decoded message
 	for specIndex, cacheSpec in pairs(SpecMapTalentCache.specs) do
 		local talentGroup = specIndex;
+		local baseTalentGroup = ResolveBaseTalentGroup(talentGroup);
 		-- Iterate through all talent tabs (1-3 for player talents)
 		for tabId = 1, MAX_TALENT_TABS do
 			local tabCache = cacheSpec.tabs[tabId];
@@ -351,12 +362,12 @@ function SpecMap_BuildTalentCache()
 			-- Get all talents in this tab using base game API
 			local numTalents = GetNumTalents(tabId, false, false);
 			for talentIndex = 1, numTalents do
-				local talentLink = GetTalentLink(tabId, talentIndex, false, false, 1, false);
+				local talentLink = GetTalentLink(tabId, talentIndex, false, false, baseTalentGroup, false);
 				if ( talentLink ) then
 					local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 					if ( talentId ) then
 						-- Get talent info
-						local name, iconTexture, tier, column = GetTalentInfo(tabId, talentIndex, false, false, 1);
+						local name, iconTexture, tier, column = GetTalentInfo(tabId, talentIndex, false, false, baseTalentGroup);
 						
 						-- Initialize or get existing details
 						local details = tabCache.talentDetails[talentId];
@@ -375,12 +386,12 @@ function SpecMap_BuildTalentCache()
 						end
 						
 						-- Get prerequisite information
-						local prereqTier, prereqColumn = GetTalentPrereqs(tabId, talentIndex, false, false, 1);
+						local prereqTier, prereqColumn = GetTalentPrereqs(tabId, talentIndex, false, false, baseTalentGroup);
 						if ( prereqTier and prereqColumn ) then
 							-- Find the prerequisite talent at this tier/column
 							local prereqTalentIndex = nil;
 							for i = 1, numTalents do
-								local prereqName, prereqIcon, prereqTierCheck, prereqColumnCheck = GetTalentInfo(tabId, i, false, false, 1);
+								local prereqName, prereqIcon, prereqTierCheck, prereqColumnCheck = GetTalentInfo(tabId, i, false, false, talentGroup);
 								if ( prereqTierCheck == prereqTier and prereqColumnCheck == prereqColumn ) then
 									prereqTalentIndex = i;
 									break;
@@ -389,10 +400,10 @@ function SpecMap_BuildTalentCache()
 							
 							-- Get the prerequisite talent ID and max rank
 							if ( prereqTalentIndex ) then
-								local prereqTalentLink = GetTalentLink(tabId, prereqTalentIndex, false, false, 1, false);
+								local prereqTalentLink = GetTalentLink(tabId, prereqTalentIndex, false, false, baseTalentGroup, false);
 								if ( prereqTalentLink ) then
 									local prereqTalentId = SpecMap_TalentCacheExtractTalentID(prereqTalentLink);
-									local _, _, _, _, _, maxRank = GetTalentInfo(tabId, prereqTalentIndex, false, false, 1);
+									local _, _, _, _, _, maxRank = GetTalentInfo(tabId, prereqTalentIndex, false, false, baseTalentGroup);
 									
 									-- Store prerequisite info (required rank is always the max rank)
 									if ( prereqTalentId and maxRank ) then
@@ -669,7 +680,7 @@ function SpecMap_TalentCacheCheckPrereqs(talentGroup, tabIndex, talentId, tier)
 							local talentIndex = nil;
 							local numTalents = GetNumTalents(tabIndex, false, false);
 							for i = 1, numTalents do
-								local talentLink = GetTalentLink(tabIndex, i, false, false, 1, false);
+								local talentLink = GetTalentLink(tabIndex, i, false, false, talentGroup, false);
 								if ( talentLink ) then
 									local linkTalentId = SpecMap_TalentCacheExtractTalentID(talentLink);
 									if ( linkTalentId == talentId ) then
@@ -679,21 +690,21 @@ function SpecMap_TalentCacheCheckPrereqs(talentGroup, tabIndex, talentId, tier)
 								end
 							end
 							if ( talentIndex ) then
-								local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, false, false, 1);
+								local prereqTier, prereqColumn = GetTalentPrereqs(tabIndex, talentIndex, false, false, talentGroup);
 								if ( prereqTier and prereqColumn ) then
 									local prereqTalentIndex = nil;
 									for i = 1, numTalents do
-										local name, iconTexture, tier, col = GetTalentInfo(tabIndex, i, false, false, 1);
+										local name, iconTexture, tier, col = GetTalentInfo(tabIndex, i, false, false, talentGroup);
 										if ( tier == prereqTier and col == prereqColumn ) then
 											prereqTalentIndex = i;
 											break;
 										end
 									end
 									if ( prereqTalentIndex ) then
-										local prereqTalentLink = GetTalentLink(tabIndex, prereqTalentIndex, false, false, 1, false);
+										local prereqTalentLink = GetTalentLink(tabIndex, prereqTalentIndex, false, false, baseTalentGroup, false);
 										if ( prereqTalentLink ) then
 											local prereqTalentId = SpecMap_TalentCacheExtractTalentID(prereqTalentLink);
-											local _, _, _, _, _, maxRank = GetTalentInfo(tabIndex, prereqTalentIndex, false, false, 1);
+											local _, _, _, _, _, maxRank = GetTalentInfo(tabIndex, prereqTalentIndex, false, false, baseTalentGroup);
 											if ( prereqTalentId and maxRank ) then
 												details.prereqTalentId = prereqTalentId;
 												details.prereqRank = maxRank; -- Required rank is always the maximum rank
@@ -2031,7 +2042,7 @@ end
 function PlayerTalentFrameTalent_OnClick(self, button)
 	if ( IsModifiedClick("CHATLINK") ) then
 		local link = GetTalentLink(PanelTemplates_GetSelectedTab(PlayerTalentFrame), self:GetID(),
-			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
+-			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
 		-- Debug: Print raw talent hyperlink
 		if ( link ) then
 			print("DEBUG: Raw talent hyperlink (PlayerTalentFrameTalent_OnClick):", link);
@@ -2058,9 +2069,10 @@ function PlayerTalentFrameTalent_OnClick(self, button)
 		if ( button == "LeftButton" ) then
 			local tabIndex = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
 			local talentIndex = self:GetID();
-			local talentLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
+			local resolvedGroup = ResolveBaseTalentGroup(PlayerTalentFrame.talentGroup);
+			local talentLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, resolvedGroup, GetCVarBool("previewTalents"));
 			local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
-			local _, _, tier, column, _, maxRank, _, meetsPrereq = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup);
+			local _, _, tier, column, _, maxRank, _, meetsPrereq = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, resolvedGroup);
 			local isAvailable = SpecMap_TalentCacheIsTalentAvailable(PlayerTalentFrame.talentGroup, tabIndex, talentId, tier);
 			local freeTalents = SpecMap_TalentCacheGetFreeTalents();
 			if ( isAvailable and (freeTalents == nil or freeTalents > 0) and SpecMap_TalentCacheAdjustRank(PlayerTalentFrame.talentGroup, tabIndex, talentId, 1, maxRank, tier) ) then
@@ -2073,9 +2085,10 @@ function PlayerTalentFrameTalent_OnClick(self, button)
         elseif ( button == "RightButton" ) then
             local tabIndex = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
             local talentIndex = self:GetID();
-            local talentLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
+            local resolvedGroup = ResolveBaseTalentGroup(PlayerTalentFrame.talentGroup);
+            local talentLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, resolvedGroup, GetCVarBool("previewTalents"));
             local talentId = SpecMap_TalentCacheExtractTalentID(talentLink);
-			local _, _, tier, _, _, maxRank = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup);
+			local _, _, tier, _, _, maxRank = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, resolvedGroup);
 			
 			-- Get current rank from cache (includes user changes)
 			local currentRank = SpecMap_TalentCacheGetRank(PlayerTalentFrame.talentGroup, tabIndex, talentId);
@@ -2103,8 +2116,9 @@ end
 
 function PlayerTalentFrameTalent_OnEvent(self, event, ...)
 	if ( GameTooltip:IsOwned(self) ) then
+		local resolvedGroup = ResolveBaseTalentGroup(PlayerTalentFrame.talentGroup);
 		GameTooltip:SetTalent(PanelTemplates_GetSelectedTab(PlayerTalentFrame), self:GetID(),
-			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
+-			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
 	end
 end
 
@@ -2114,18 +2128,19 @@ function PlayerTalentFrameTalent_OnEnter(self)
 	local tabIndex = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
 	local talentIndex = self:GetID();
 	local talentGroup = PlayerTalentFrame.talentGroup;
+	local baseTalentGroup = ResolveBaseTalentGroup(talentGroup);
 	
 	-- For player talents, get the current rank from SpecMap cache and show tooltip with that rank
 	if ( not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
 		-- Get base talent link (rank 0, which is rank -1 in the link format)
-		local baseLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, talentGroup, false);
+		local baseLink = GetTalentLink(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, false);
 		local talentId = SpecMap_TalentCacheExtractTalentID(baseLink);
 		
 		if ( talentId and type(SpecMap_TalentCacheGetRank) == "function" ) then
 			local currentRank = SpecMap_TalentCacheGetRank(talentGroup, tabIndex, talentId) or 0;
 			
 			-- Get talent name for the link
-			local talentName = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, 1);
+			local talentName = GetTalentInfo(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup);
 			
 			if ( talentName and currentRank > 0 ) then
 				-- Construct hyperlink with correct rank
@@ -2136,15 +2151,15 @@ function PlayerTalentFrameTalent_OnEnter(self)
 				GameTooltip:SetHyperlink(talentLink);
 			else
 				-- Rank is 0 or no name, use normal SetTalent
-				GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, talentGroup, false);
+				GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, false);
 			end
 		else
 			-- Fallback to normal SetTalent
-			GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, talentGroup, false);
+			GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, false);
 		end
 	else
 		-- For pet/inspect, use normal SetTalent
-		GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, talentGroup, GetCVarBool("previewTalents"));
+		GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, GetCVarBool("previewTalents"));
 	end
 end
 
@@ -2464,7 +2479,7 @@ function PlayerTalentFrame_UpdateTabs(playerLevel)
 			local totalPreviewPointsSpent = 0;
 			for i = 1, numTabs do
 				if ( i ~= GLYPH_TALENT_TAB ) then
-					local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(i, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup);
+					local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(i, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, ResolveBaseTalentGroup(PlayerTalentFrame.talentGroup));
 					local cachePoints = SpecMap_TalentCacheSumTabPoints(PlayerTalentFrame.talentGroup, i);
 					if ( cachePoints ~= nil ) then
 						pointsSpent = cachePoints;
@@ -2499,7 +2514,7 @@ function PlayerTalentFrame_UpdateTabs(playerLevel)
 			tab = _G["PlayerTalentFrameTab"..i];
 			if ( tab ) then
 				if ( i <= numTabs ) then
-					local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(i, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup);
+					local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(i, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, ResolveBaseTalentGroup(PlayerTalentFrame.talentGroup));
 					if ( i == selectedTab ) then
 						-- If tab is the selected tab set the points spent info (hidden when using grid layout)
 						-- Points spent is now shown in each column header instead
@@ -3929,7 +3944,7 @@ function PlayerTalentFrameSpecDropdown_Update()
 				if ( activeTalentGroup and activeTalentGroup > 0 ) then
 					selectedSpecNumber = activeTalentGroup;
 					if ( PlayerTalentFrame ) then
-						PlayerTalentFrame.talentGroup = activeTalentGroup;
+						PlayerTalentFrame.talentGroup = activeSpecNumber;
 					end
 				else
 					-- Fallback to current talentGroup or default to 1
@@ -3997,3 +4012,53 @@ function PlayerTalentFrameSpecDropdown_Update()
 		dropdownButton:Hide();
 	end
 end
+
+if ( not SpecMapBaseTalentWrappersInitialized ) then
+	SpecMapBaseTalentWrappersInitialized = true;
+
+	local Original_GetTalentLink = GetTalentLink;
+	function GetTalentLink(tabIndex, talentIndex, inspect, pet, talentGroup, showPartiallySpent)
+		return Original_GetTalentLink(tabIndex, talentIndex, inspect, pet, ResolveBaseTalentGroup(talentGroup), showPartiallySpent);
+	end
+
+	local Original_GetTalentInfo = GetTalentInfo;
+	function GetTalentInfo(tabIndex, talentIndex, inspect, pet, talentGroup)
+		return Original_GetTalentInfo(tabIndex, talentIndex, inspect, pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_GetTalentPrereqs = GetTalentPrereqs;
+	function GetTalentPrereqs(tabIndex, talentIndex, inspect, pet, talentGroup)
+		return Original_GetTalentPrereqs(tabIndex, talentIndex, inspect, pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_GetUnspentTalentPoints = GetUnspentTalentPoints;
+	function GetUnspentTalentPoints(inspect, pet, talentGroup)
+		return Original_GetUnspentTalentPoints(inspect, pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_AddPreviewTalentPoints = AddPreviewTalentPoints;
+	function AddPreviewTalentPoints(tabIndex, talentIndex, delta, pet, talentGroup)
+		return Original_AddPreviewTalentPoints(tabIndex, talentIndex, delta, pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_LearnTalent = LearnTalent;
+	function LearnTalent(tabIndex, talentIndex, pet, talentGroup)
+		return Original_LearnTalent(tabIndex, talentIndex, pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_ResetGroupPreviewTalentPoints = ResetGroupPreviewTalentPoints;
+	function ResetGroupPreviewTalentPoints(pet, talentGroup)
+		return Original_ResetGroupPreviewTalentPoints(pet, ResolveBaseTalentGroup(talentGroup));
+	end
+
+	local Original_GetGroupPreviewTalentPointsSpent = GetGroupPreviewTalentPointsSpent;
+	function GetGroupPreviewTalentPointsSpent(pet, talentGroup)
+		return Original_GetGroupPreviewTalentPointsSpent(pet, ResolveBaseTalentGroup(talentGroup));
+	end
+end
+
+SpecMapTalentCache = {
+	specs = {},
+	ready = false,
+	freeTalents = nil,
+};
