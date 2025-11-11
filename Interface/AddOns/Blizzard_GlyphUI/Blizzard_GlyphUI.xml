@@ -106,7 +106,7 @@
 	</Texture>
 
 	<Frame name="GlyphFrame" hidden="true">
-		<Size x="384" y="544"/>
+		<Size x="394" y="512"/>
 		<Anchors>
 			<Anchor point="TOPLEFT">
 				<Offset x="0" y="0"/>
@@ -120,17 +120,10 @@
 				<Texture name="$parentBackground" file="Interface\Spellbook\UI-GlyphFrame">
 					<Size x="323" y="349"/>
 					<Anchors>
-						<Anchor point="TOPLEFT" x="20" y="-59"/>
+						<Anchor point="TOPLEFT" x="15" y="-63"/>
 					</Anchors>
 					<TexCoords left="0.041015625" right="0.65625" top="0.140625" bottom="0.8046875"/>
 				</Texture>
-				<FontString name="$parentTitleText" inherits="GameFontNormal" text="GLYPHS">
-					<Anchors>
-						<Anchor point="TOP">
-							<Offset x="0" y="-18"/>
-						</Anchor>
-					</Anchors>
-				</FontString>	
 			</Layer>
 			<Layer level="OVERLAY">
 				<Texture name="$parentGlow" parentKey="glow" file="Interface\Spellbook\UI-GlyphFrame-Glow" hidden="true">

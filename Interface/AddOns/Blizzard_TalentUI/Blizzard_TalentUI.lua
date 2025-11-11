@@ -152,8 +152,7 @@ StaticPopupDialogs["CONFIRM_LEARN_PREVIEW_TALENTS"] = {
 	exclusive = 1,
 }
 
-UIPanelWindows["PlayerTalentFrame"] = { area = "center", pushable = 0, whileDead = 1 };
-
+UIPanelWindows["PlayerTalentFrame"] = { area = "left", pushable = 1, whileDead = 1 };
 
 -- global constants
 GLYPH_TALENT_TAB = 4;
@@ -233,6 +232,228 @@ local talentSpecInfoCache = {
 };
 -- cache talent tab widths so we can resize tabs to fit for localization
 local talentTabWidthCache = { };
+local specTreeTotals = {};
+local pendingActiveSpecSelection = nil;
+local glyphViewActive = false;
+
+local playerSpecTabFrames = {};
+
+local function EnsureTalentSpecCacheEntry(specKey)
+	if ( not talentSpecInfoCache[specKey] ) then
+		talentSpecInfoCache[specKey] = {};
+	end
+end
+
+local function EnsureSpecInTalentSortOrder(specKey)
+	if ( type(TALENT_SORT_ORDER) ~= "table" ) then
+		TALENT_SORT_ORDER = {};
+	end
+	for i = 1, #TALENT_SORT_ORDER do
+		if ( TALENT_SORT_ORDER[i] == specKey ) then
+			return;
+		end
+	end
+	-- Insert player specs before pet specs to keep ordering predictable
+	if ( type(specKey) == "string" and string.sub(specKey, 1, 7) ~= "petspec" ) then
+		local inserted = false;
+		for i = 1, #TALENT_SORT_ORDER do
+			local key = TALENT_SORT_ORDER[i];
+			if ( type(key) == "string" and string.sub(key, 1, 7) == "petspec" ) then
+				table.insert(TALENT_SORT_ORDER, i, specKey);
+				inserted = true;
+				break;
+			end
+		end
+		if ( not inserted ) then
+			table.insert(TALENT_SORT_ORDER, specKey);
+		end
+	else
+		table.insert(TALENT_SORT_ORDER, specKey);
+	end
+end
+
+local function EnsurePlayerSpecDefinition(specIndex)
+	local specKey = "spec"..specIndex;
+	if ( not specs[specKey] ) then
+		-- Create a default spec definition for additional specializations
+		local ordinalName = GetOrdinalSpecName(specIndex);
+		specs[specKey] = {
+			name = ordinalName,
+			talentGroup = specIndex,
+			unit = "player",
+			pet = false,
+			tooltip = ordinalName,
+			portraitUnit = "player",
+			defaultSpecTexture = "Interface\\Icons\\Ability_Marksmanship",
+			hasGlyphs = true,
+			glyphName = ordinalName,
+		};
+	else
+		-- Ensure existing definition stays in sync with the spec index
+		specs[specKey].talentGroup = specIndex;
+		specs[specKey].unit = "player";
+		specs[specKey].pet = false;
+		specs[specKey].hasGlyphs = true;
+		if ( not specs[specKey].name ) then
+			specs[specKey].name = GetOrdinalSpecName(specIndex);
+		end
+		if ( not specs[specKey].tooltip ) then
+			specs[specKey].tooltip = specs[specKey].name;
+		end
+		if ( not specs[specKey].glyphName ) then
+			specs[specKey].glyphName = specs[specKey].name;
+		end
+	end
+
+	EnsureTalentSpecCacheEntry(specKey);
+
+	if ( not specTreeTotals[specKey] ) then
+		specTreeTotals[specKey] = { 0, 0, 0 };
+	end
+
+	EnsureSpecInTalentSortOrder(specKey);
+
+	return specKey;
+end
+
+local function EnsurePlayerSpecTab(specIndex)
+	local specKey = "spec"..specIndex;
+	if ( specTabs[specKey] ) then
+		playerSpecTabFrames[specIndex] = specTabs[specKey];
+		return specTabs[specKey];
+	end
+
+	if ( not PlayerTalentFrame ) then
+		return nil;
+	end
+
+	local nextIndex = numSpecTabs + 1;
+	while ( _G["PlayerSpecTab"..nextIndex] ) do
+		nextIndex = nextIndex + 1;
+	end
+
+	local frameName = "PlayerSpecTab"..nextIndex;
+	local frame = CreateFrame("CheckButton", frameName, PlayerTalentFrame, "PlayerSpecTabTemplate");
+	-- Anchor temporarily; PlayerTalentFrame_UpdateSpecs will reposition it properly
+	frame:SetPoint("TOPLEFT", PlayerTalentFrame, "TOPRIGHT", -32, -65 - ((specIndex - 1) * 22));
+
+	PlayerSpecTab_Load(frame, specKey);
+	playerSpecTabFrames[specIndex] = frame;
+
+	return frame;
+end
+
+local function HideUnusedPlayerSpecTabs(specCount)
+	for index, frame in pairs(playerSpecTabFrames) do
+		if ( frame and index > specCount ) then
+			frame:Hide();
+			frame:SetChecked(false);
+		end
+	end
+end
+
+local function PlayerTalentFrame_GetOrderedSpecTabs()
+	local playerTabs = {};
+	local petTabs = {};
+
+	for specKey, frame in pairs(specTabs) do
+		if ( frame ) then
+			local spec = specs[specKey];
+			if ( spec ) then
+				if ( spec.pet ) then
+					table.insert(petTabs, frame);
+				else
+					table.insert(playerTabs, frame);
+				end
+			end
+		end
+	end
+
+	table.sort(playerTabs, function(a, b)
+		local specA = specs[a.specIndex];
+		local specB = specs[b.specIndex];
+		local groupA = specA and specA.talentGroup or 0;
+		local groupB = specB and specB.talentGroup or 0;
+		return groupA < groupB;
+	end);
+
+	table.sort(petTabs, function(a, b)
+		local specA = specs[a.specIndex];
+		local specB = specs[b.specIndex];
+		local groupA = specA and specA.talentGroup or 0;
+		local groupB = specB and specB.talentGroup or 0;
+		return groupA < groupB;
+	end);
+
+	local ordered = {};
+	for _, frame in ipairs(playerTabs) do
+		table.insert(ordered, frame);
+	end
+	for _, frame in ipairs(petTabs) do
+		table.insert(ordered, frame);
+	end
+	return ordered;
+end
+
+local function PlayerTalentFrame_UpdateSpecTabChecks()
+	for key, frame in pairs(specTabs) do
+		if ( frame ) then
+			if ( key == selectedSpec ) then
+				frame:SetChecked(1);
+			else
+				frame:SetChecked(nil);
+			end
+		end
+	end
+end
+
+local function PlayerTalentFrame_SelectSpecByKey(specKey, suppressRefresh)
+	if ( not PlayerTalentFrame ) then
+		return;
+	end
+
+	local spec = specs[specKey];
+	if ( not spec ) then
+		return;
+	end
+
+	local glyphTabSelected = (PanelTemplates_GetSelectedTab(PlayerTalentFrame) == GLYPH_TALENT_TAB);
+
+	selectedSpec = specKey;
+
+	if ( spec.pet ) then
+		PlayerTalentFrame.pet = true;
+		PlayerTalentFrame.inspect = false;
+		PlayerTalentFrame.unit = spec.unit or "pet";
+		PlayerTalentFrame.talentGroup = spec.talentGroup;
+	else
+		PlayerTalentFrame.pet = false;
+		PlayerTalentFrame.inspect = false;
+		PlayerTalentFrame.unit = spec.unit or "player";
+		PlayerTalentFrame.talentGroup = spec.talentGroup;
+		selectedSpecNumber = spec.talentGroup;
+	end
+
+	PlayerTalentFrame_UpdateSpecTabChecks();
+
+	if ( glyphTabSelected and not spec.pet ) then
+		PanelTemplates_SetTab(PlayerTalentFrame, GLYPH_TALENT_TAB);
+		if ( type(PlayerTalentFrame_ShowGlyphFrame) == "function" ) then
+			PlayerTalentFrame_ShowGlyphFrame();
+		end
+	else
+		if ( PanelTemplates_GetSelectedTab(PlayerTalentFrame) ~= 1 ) then
+			PanelTemplates_SetTab(PlayerTalentFrame, 1);
+		end
+		if ( type(PlayerTalentFrame_HideGlyphFrame) == "function" ) then
+			PlayerTalentFrame_HideGlyphFrame();
+		end
+	end
+
+	if ( not suppressRefresh ) then
+		PlayerTalentFrame_Refresh();
+	end
+end
 
 
 
@@ -284,6 +505,7 @@ local function SpecMap_ResetTalentCache()
 	end
 	SpecMapTalentCache.ready = false;
 	SpecMapTalentCache.freeTalents = nil;
+	specTreeTotals = {};
 end
 
 function SpecMap_BuildTalentCache()
@@ -909,7 +1131,12 @@ function SpecMap_GetActiveTalentGroup()
 	if ( specMap ) then
 		local active = specMap.activeSpec;
 		if ( type(active) == "number" ) then
-			return (active % count) + 1;
+			if ( active < 1 ) then
+				active = 1;
+			elseif ( active > count ) then
+				active = ((active - 1) % count) + 1;
+			end
+			return active;
 		end
 	end
 	return 1;
@@ -1210,11 +1437,46 @@ local function PlayerTalentFrame_HandleSpecMapUpdate()
 	
 	-- Set active spec number from decoded SpecMap message
 	local specMap = GetSpecMapTable();
+	local specCount = numTalentGroups;
 	if ( specMap and type(specMap.activeSpec) == "number" ) then
 		-- specMap.activeSpec is already 1-based (converted in DecodeSpecInfo)
 		activeSpecNumber = specMap.activeSpec;
 	else
 		activeSpecNumber = activeTalentGroup;
+	end
+
+	if ( specMap and type(specMap.specCount) == "number" ) then
+		specCount = specMap.specCount;
+	end
+
+	-- Ensure we have spec definitions and tabs for each available specialization
+	if ( specCount and specCount > 0 ) then
+		for index = 1, specCount do
+			local specData = specMap and specMap.specs and specMap.specs[index] or nil;
+			local totals = { 0, 0, 0 };
+			if ( specData and type(specData.talents) == "table" ) then
+				for _, talentData in ipairs(specData.talents) do
+					local tabId = tonumber(talentData.tabId or talentData.tab or talentData.tabIndex);
+					local rank = tonumber(talentData.rank);
+					if ( tabId ) then
+						tabId = tabId + 1;
+						if ( tabId >= 1 and tabId <= 3 and rank and rank >= 0 ) then
+							totals[tabId] = (totals[tabId] or 0) + (rank + 1);
+						end
+					end
+				end
+			end
+			specTreeTotals["spec" .. index] = totals;
+			EnsurePlayerSpecDefinition(index);
+			EnsurePlayerSpecTab(index);
+		end
+		for key in pairs(specTreeTotals) do
+			local idx = tonumber(string.match(key or "", "^spec(%d+)$"));
+			if ( idx and idx > specCount ) then
+				specTreeTotals[key] = nil;
+			end
+		end
+		HideUnusedPlayerSpecTabs(specCount);
 	end
 	
 	-- Also update base game active spec if possible (this ensures GetActiveTalentGroup returns correct value)
@@ -1252,28 +1514,25 @@ local function PlayerTalentFrame_HandleSpecMapUpdate()
 		end
 	end
 
-	PlayerTalentFrame_UpdateActiveSpec(activeTalentGroup, numTalentGroups);
-	
-	-- Rebuild menu items when spec map updates (spec count may have changed)
-	local dropdownButton = _G["PlayerTalentFrameSpecDropdown"];
-	if ( dropdownButton and type(PlayerTalentFrameSpecDropdown_BuildMenu) == "function" ) then
-		PlayerTalentFrameSpecDropdown_BuildMenu(dropdownButton);
-	end
-	
-	-- Update spec dropdown (this will update the text color based on active spec)
-	-- Do this AFTER activeSpecNumber is set so the dropdown can check the correct value
-	if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-		PlayerTalentFrameSpecDropdown_Update();
+	if ( type(specCount) == "number" and specCount > 0 ) then
+		if ( selectedSpecNumber and selectedSpecNumber > specCount ) then
+			selectedSpecNumber = specCount;
+		elseif ( not selectedSpecNumber ) then
+			selectedSpecNumber = (activeSpecNumber and activeSpecNumber <= specCount) and activeSpecNumber or 1;
+		end
+
+		if ( selectedSpecNumber ) then
+			selectedSpec = "spec"..selectedSpecNumber;
+		end
 	end
 
+	PlayerTalentFrame_UpdateActiveSpec(activeTalentGroup, numTalentGroups);
+	
+	PlayerTalentFrame_UpdateSpecTabChecks();
+
 	if ( PlayerTalentFrame:IsShown() ) then
-		-- Also update dropdown after refresh to ensure it reflects the active spec
-		if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-			PlayerTalentFrameSpecDropdown_Update();
-		end
-		if ( type(PlayerTalentFrameSpecDropdown_SelectSpec) == "function" ) then
-			PlayerTalentFrameSpecDropdown_SelectSpec(activeSpecNumber);
-		end
+		local targetSpecIndex = selectedSpecNumber or activeSpecNumber or 1;
+		PlayerTalentFrame_SelectSpecByKey("spec"..targetSpecIndex, true);
 		PlayerTalentFrame_Refresh();
 	end
 
@@ -1391,10 +1650,105 @@ end
 function PlayerTalentFrame_ShowGlyphFrame()
 	GlyphFrame_LoadUI();
 	if ( GlyphFrame ) then
+		-- Ensure we're viewing a player spec when showing glyphs
+		if ( PlayerTalentFrame.pet ) then
+			local targetSpecNumber = selectedSpecNumber or SpecMap_GetActiveTalentGroup() or 1;
+			PlayerTalentFrame_SelectSpecByKey("spec" .. targetSpecNumber, true);
+		end
+
+		if ( GLYPH_VIEW_TALENT_FRAME_WIDTH == nil or GLYPH_VIEW_TALENT_FRAME_HEIGHT == nil ) then
+			local glyphWidth = GlyphFrame and GlyphFrame:GetWidth();
+			local glyphHeight = GlyphFrame and GlyphFrame:GetHeight();
+			local baseWidth = PlayerTalentFrame.originalWidth or PlayerTalentFrame:GetWidth();
+			local baseHeight = PlayerTalentFrame.originalHeight or PlayerTalentFrame:GetHeight();
+
+			if ( glyphWidth and glyphWidth > 0 ) then
+				GLYPH_VIEW_TALENT_FRAME_WIDTH = glyphWidth;
+			else
+				GLYPH_VIEW_TALENT_FRAME_WIDTH = baseWidth;
+			end
+
+			if ( glyphHeight and glyphHeight > 0 ) then
+				local targetHeight = baseHeight + (glyphHeight - baseHeight) * 0.5;
+				if ( targetHeight < baseHeight ) then
+					targetHeight = baseHeight;
+				end
+				GLYPH_VIEW_TALENT_FRAME_HEIGHT = math.floor(targetHeight + 0.5);
+			else
+				GLYPH_VIEW_TALENT_FRAME_HEIGHT = baseHeight;
+			end
+		end
+
+		PlayerTalentFrame:SetWidth(GLYPH_VIEW_TALENT_FRAME_WIDTH);
+		PlayerTalentFrame:SetHeight(GLYPH_VIEW_TALENT_FRAME_HEIGHT);
+		PlayerTalentFrame:SetAttribute("UIPanelLayout-width", GLYPH_VIEW_TALENT_FRAME_WIDTH);
+		PlayerTalentFrame:SetAttribute("UIPanelLayout-height", GLYPH_VIEW_TALENT_FRAME_HEIGHT);
+		if ( GlyphFrame ) then
+			GlyphFrame:SetParent(GlyphFrame.originalParent or PlayerTalentFrame);
+			GlyphFrame:ClearAllPoints();
+			if ( GlyphFrame.originalPoints ) then
+				for _, pointData in ipairs(GlyphFrame.originalPoints) do
+					GlyphFrame:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+				end
+			else
+				GlyphFrame:SetPoint("TOPLEFT", PlayerTalentFrame, "TOPLEFT", 11, -12);
+				GlyphFrame:SetPoint("BOTTOMRIGHT", PlayerTalentFrame, "BOTTOMRIGHT", -32, 76);
+			end
+		end
+
 		-- Hide the talent frame title text when viewing glyphs
 		if ( PlayerTalentFrameTitleText ) then
-			PlayerTalentFrameTitleText:Hide();
+			PlayerTalentFrameTitleText:Show();
+			PlayerTalentFrameTitleText:ClearAllPoints();
+			PlayerTalentFrameTitleText:SetPoint("TOP", PlayerTalentFrame, "TOP", 0, -18);
 		end
+		if ( GlyphFrameTitleText ) then
+			GlyphFrameTitleText:Hide();
+		end
+		if ( PlayerTalentFrameGridContainer ) then
+			PlayerTalentFrameGridContainer:Hide();
+		end
+		if ( PlayerTalentFrameTalents ) then
+			PlayerTalentFrameTalents:Hide();
+		end
+		if ( PlayerTalentFrameScrollFrame ) then
+			PlayerTalentFrameScrollFrame:Hide();
+		end
+		if ( PlayerTalentFramePointsBar ) then
+			PlayerTalentFramePointsBar:Hide();
+		end
+		if ( PlayerTalentFramePreviewBar ) then
+			PlayerTalentFramePreviewBar:Hide();
+		end
+		if ( PlayerTalentFrameStatusFrame ) then
+			PlayerTalentFrameStatusFrame:Show();
+			PlayerTalentFrameStatusFrame:ClearAllPoints();
+			if ( PlayerTalentFrameStatusFrame.originalPoints ) then
+				for _, pointData in ipairs(PlayerTalentFrameStatusFrame.originalPoints) do
+					PlayerTalentFrameStatusFrame:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+				end
+			else
+				PlayerTalentFrameStatusFrame:SetPoint("TOP", PlayerTalentFramePointsBar or PlayerTalentFrame, "BOTTOM", 0, -12);
+			end
+		end
+		if ( PlayerTalentFrameActivateButton ) then
+			PlayerTalentFrameActivateButton:Show();
+			PlayerTalentFrameActivateButton:ClearAllPoints();
+			if ( PlayerTalentFrameActivateButton.originalPoints ) then
+				for _, pointData in ipairs(PlayerTalentFrameActivateButton.originalPoints) do
+					PlayerTalentFrameActivateButton:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+				end
+			else
+				PlayerTalentFrameActivateButton:SetPoint("RIGHT", PlayerTalentFrameStatusFrame or PlayerTalentFramePointsBar or PlayerTalentFrame, "LEFT", -5, 0);
+			end
+		end
+		if ( PlayerTalentFrame.DisableDrawLayer ) then
+			PlayerTalentFrame:DisableDrawLayer("BACKGROUND");
+			PlayerTalentFrame:DisableDrawLayer("BORDER");
+		end
+
+		glyphViewActive = true;
+
 		-- set the title text of the GlyphFrame
 		-- Use spec name with "Glyphs" instead of "Specialization"
 		local numTalentGroups;
@@ -1404,16 +1758,16 @@ function PlayerTalentFrame_ShowGlyphFrame()
 			numTalentGroups = SpecMap_GetTalentGroupCount();
 		end
 		
-		if ( numTalentGroups > 1 ) then
-			-- Get the current spec number (use selectedSpecNumber if available, otherwise talentGroup)
-			local currentSpecNumber = selectedSpecNumber or PlayerTalentFrame.talentGroup or 1;
-			-- Get the spec name
-			local specName = GetOrdinalSpecName(currentSpecNumber);
-			-- Replace "Specialization" with "Glyphs"
+		local specNumber = selectedSpecNumber or PlayerTalentFrame.talentGroup or activeSpecNumber or SpecMap_GetActiveTalentGroup() or GetActiveTalentGroup(false, false) or 1;
+		if ( specNumber < 1 ) then
+			specNumber = 1;
+		end
+		if ( numTalentGroups and numTalentGroups > 1 ) then
+			local specName = GetOrdinalSpecName(specNumber);
 			local glyphTitle = string.gsub(specName, "Specialization", "Glyphs");
-			GlyphFrameTitleText:SetText(glyphTitle);
+			PlayerTalentFrameTitleText:SetText(glyphTitle);
 		else
-			GlyphFrameTitleText:SetText(GLYPHS);
+			PlayerTalentFrameTitleText:SetText(GLYPHS);
 		end
 		
 		-- show/update the glyph frame
@@ -1438,15 +1792,20 @@ function PlayerTalentFrame_ShowGlyphFrame()
 		end
 		
 		-- Update glyph title text when switching specs
-		if ( GlyphFrame and GlyphFrame:IsShown() and GlyphFrameTitleText ) then
-			if ( numTalentGroups > 1 ) then
-				local currentSpecNumber = selectedSpecNumber or PlayerTalentFrame.talentGroup or 1;
-				local specName = GetOrdinalSpecName(currentSpecNumber);
-				local glyphTitle = string.gsub(specName, "Specialization", "Glyphs");
-				GlyphFrameTitleText:SetText(glyphTitle);
-			else
-				GlyphFrameTitleText:SetText(GLYPHS);
+		if ( GlyphFrame and GlyphFrame:IsShown() and PlayerTalentFrameTitleText ) then
+			local specNumber = selectedSpecNumber or PlayerTalentFrame.talentGroup or activeSpecNumber or SpecMap_GetActiveTalentGroup() or GetActiveTalentGroup(false, false) or 1;
+			if ( specNumber < 1 ) then
+				specNumber = 1;
 			end
+			if ( numTalentGroups and numTalentGroups > 1 ) then
+				local specName = GetOrdinalSpecName(specNumber);
+				local glyphTitle = string.gsub(specName, "Specialization", "Glyphs");
+				PlayerTalentFrameTitleText:SetText(glyphTitle);
+			else
+				PlayerTalentFrameTitleText:SetText(GLYPHS);
+			end
+		else
+			PlayerTalentFrameTitleText:SetText(TALENTS);
 		end
 	end
 end
@@ -1461,16 +1820,116 @@ function PlayerTalentFrame_HideGlyphFrame()
 		GlyphFrame:Hide();
 	end
 	
+	if ( PlayerTalentFrame.originalWidth and PlayerTalentFrame.originalHeight ) then
+		PlayerTalentFrame:SetWidth(PlayerTalentFrame.originalWidth);
+		PlayerTalentFrame:SetHeight(PlayerTalentFrame.originalHeight);
+		PlayerTalentFrame:SetAttribute("UIPanelLayout-width", PlayerTalentFrame.originalUIPanelLayoutWidth or PlayerTalentFrame.originalWidth);
+		PlayerTalentFrame:SetAttribute("UIPanelLayout-height", PlayerTalentFrame.originalUIPanelLayoutHeight or PlayerTalentFrame.originalHeight);
+		if ( GlyphFrame ) then
+			GlyphFrame:SetParent(GlyphFrame.originalParent or PlayerTalentFrame);
+			GlyphFrame:ClearAllPoints();
+			if ( GlyphFrame.originalPoints ) then
+				for _, pointData in ipairs(GlyphFrame.originalPoints) do
+					GlyphFrame:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+				end
+			else
+				GlyphFrame:SetPoint("TOPLEFT", PlayerTalentFrame, "TOPLEFT", 11, -12);
+				GlyphFrame:SetPoint("BOTTOMRIGHT", PlayerTalentFrame, "BOTTOMRIGHT", -32, 76);
+			end
+		end
+		local backdropFrame = _G["PlayerTalentFrameBackdrop"];
+		if ( backdropFrame and backdropFrame.originalPoints ) then
+			backdropFrame:SetParent(backdropFrame.originalParent or PlayerTalentFrame);
+			backdropFrame:ClearAllPoints();
+			for _, pointData in ipairs(backdropFrame.originalPoints) do
+				backdropFrame:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+			end
+			backdropFrame:Show();
+		end
+		if ( PlayerTalentFrame.backgroundTextures and PlayerTalentFrame.originalBackgroundPoints ) then
+			for index, texture in ipairs(PlayerTalentFrame.backgroundTextures) do
+				if ( texture ) then
+					texture:SetParent(PlayerTalentFrame);
+					texture:ClearAllPoints();
+					local pointDataTable = PlayerTalentFrame.originalBackgroundPoints[index];
+					if ( pointDataTable ) then
+						for _, pointData in ipairs(pointDataTable) do
+							texture:SetPoint(pointData.point, pointData.relativeTo, pointData.relativePoint, pointData.offsetX, pointData.offsetY);
+						end
+					end
+					texture:Show();
+				end
+			end
+		end
+	end
+	if ( UIPanelWindows and UIPanelWindows[PlayerTalentFrame:GetName()] ) then
+		local panelInfo = UIPanelWindows[PlayerTalentFrame:GetName()];
+		if ( panelInfo ) then
+			panelInfo.width = PlayerTalentFrame.originalUIPanelWidth or panelInfo.width;
+			panelInfo.height = PlayerTalentFrame.originalUIPanelHeight or panelInfo.height;
+		end
+	end
+	if ( type(UpdateUIPanelPositions) == "function" ) then
+		UpdateUIPanelPositions(PlayerTalentFrame);
+	end
+
+	GLYPH_VIEW_TALENT_FRAME_WIDTH = nil;
+	GLYPH_VIEW_TALENT_FRAME_HEIGHT = nil;
+
 	-- Show the talent frame title text when hiding glyphs
 	if ( PlayerTalentFrameTitleText ) then
 		PlayerTalentFrameTitleText:Show();
+		PlayerTalentFrameTitleText:ClearAllPoints();
+		PlayerTalentFrameTitleText:SetPoint("TOP", PlayerTalentFrame, "TOP", 0, -18);
+		PlayerTalentFrameTitleText:SetText(TALENTS);
 	end
+	if ( GlyphFrameTitleText ) then
+		GlyphFrameTitleText:Hide();
+	end
+	if ( PlayerTalentFrameGridContainer ) then
+		PlayerTalentFrameGridContainer:Show();
+	end
+	if ( PlayerTalentFrameTalents ) then
+		PlayerTalentFrameTalents:Show();
+	end
+	if ( PlayerTalentFrameScrollFrame ) then
+		PlayerTalentFrameScrollFrame:Show();
+	end
+	if ( PlayerTalentFramePointsBar ) then
+		PlayerTalentFramePointsBar:Show();
+	end
+	if ( PlayerTalentFrameStatusFrame ) then
+		PlayerTalentFrameStatusFrame:Show();
+	end
+	if ( PlayerTalentFramePreviewBar ) then
+		PlayerTalentFramePreviewBar:Show();
+	end
+	if ( PlayerTalentFrameActivateButton ) then
+		PlayerTalentFrameActivateButton:Show();
+	end
+	if ( PlayerTalentFrame.EnableDrawLayer ) then
+		PlayerTalentFrame:EnableDrawLayer("BACKGROUND");
+		PlayerTalentFrame:EnableDrawLayer("BORDER");
+	end
+
+	glyphViewActive = false;
 end
 
 
 function PlayerTalentFrame_OnLoad(self)
 	-- Set scale to baseline (1.0) to ensure proper alignment with GlyphFrame
 	self:SetScale(1.0);
+	self.originalWidth = self.originalWidth or self:GetWidth();
+	self.originalHeight = self.originalHeight or self:GetHeight();
+	self.originalUIPanelLayoutWidth = self.originalUIPanelLayoutWidth or self:GetAttribute("UIPanelLayout-width");
+	self.originalUIPanelLayoutHeight = self.originalUIPanelLayoutHeight or self:GetAttribute("UIPanelLayout-height");
+	if ( UIPanelWindows and UIPanelWindows[self:GetName()] ) then
+		local panelInfo = UIPanelWindows[self:GetName()];
+		if ( panelInfo ) then
+			self.originalUIPanelWidth = self.originalUIPanelWidth or panelInfo.width;
+			self.originalUIPanelHeight = self.originalUIPanelHeight or panelInfo.height;
+		end
+	end
 	
 	-- Create backdrop frame with black background (0.55 alpha) at specified points
 	local backdropFrame = CreateFrame("Frame", "PlayerTalentFrameBackdrop", self);
@@ -1484,10 +1943,56 @@ function PlayerTalentFrame_OnLoad(self)
 	});
 	backdropFrame:SetBackdropColor(0, 0, 0, 0.75);
 	backdropFrame:SetFrameLevel(self:GetFrameLevel() - 1); -- Ensure it's behind other elements
+	backdropFrame.originalParent = self;
+	backdropFrame.originalPoints = {};
+	for i = 1, backdropFrame:GetNumPoints() do
+		local point, relativeTo, relativePoint, offsetX, offsetY = backdropFrame:GetPoint(i);
+		backdropFrame.originalPoints[i] = {
+			point = point,
+			relativeTo = relativeTo,
+			relativePoint = relativePoint,
+			offsetX = offsetX,
+			offsetY = offsetY,
+		};
+	end
+	
+	self.backgroundTextures = {
+		PlayerTalentFrameBackgroundTopLeft,
+		PlayerTalentFrameBackgroundTopRight,
+		PlayerTalentFrameBackgroundBottomLeft,
+		PlayerTalentFrameBackgroundBottomRight,
+	};
+	self.originalBackgroundPoints = {};
+	for index, texture in ipairs(self.backgroundTextures) do
+		if ( texture ) then
+			self.originalBackgroundPoints[index] = {};
+			for i = 1, texture:GetNumPoints() do
+				local point, relativeTo, relativePoint, offsetX, offsetY = texture:GetPoint(i);
+				self.originalBackgroundPoints[index][i] = {
+					point = point,
+					relativeTo = relativeTo,
+					relativePoint = relativePoint,
+					offsetX = offsetX,
+					offsetY = offsetY,
+				};
+			end
+		end
+	end
 	
 	-- Clear base textures from status frame, points bar, preview bar, close button, and spec tabs
 	if ( PlayerTalentFrameStatusFrame ) then
 		ClearBaseTextures(PlayerTalentFrameStatusFrame);
+		PlayerTalentFrameStatusFrame.originalPoints = {};
+		for i = 1, PlayerTalentFrameStatusFrame:GetNumPoints() do
+			local point, relativeTo, relativePoint, offsetX, offsetY = PlayerTalentFrameStatusFrame:GetPoint(i);
+			PlayerTalentFrameStatusFrame.originalPoints[i] = {
+				point = point,
+				relativeTo = relativeTo,
+				relativePoint = relativePoint,
+				offsetX = offsetX,
+				offsetY = offsetY,
+			};
+		end
 	end
 	if ( PlayerTalentFramePointsBar ) then
 		ClearBaseTextures(PlayerTalentFramePointsBar);
@@ -1495,29 +2000,18 @@ function PlayerTalentFrame_OnLoad(self)
 	if ( PlayerTalentFramePreviewBar ) then
 		ClearBaseTextures(PlayerTalentFramePreviewBar);
 	end
-	if ( PlayerTalentFrameCloseButton ) then
-		ClearBaseTextures(PlayerTalentFrameCloseButton);
-		PlayerTalentFrameCloseButton:SetNormalTexture("");
-		PlayerTalentFrameCloseButton:SetPushedTexture("");
-
-		local closeTex = PlayerTalentFrameCloseButton:CreateTexture("$parentCloseTex", "OVERLAY");
-		closeTex:SetTexture("Interface\\FrameGeneral\\Close");
-		closeTex:SetSize(16, 16);
-		closeTex:SetPoint("CENTER");
-		closeTex:SetAlpha(.60)
-		PlayerTalentFrameCloseButton:SetHitRectInsets(7, 6, 7, 6);
-		PlayerTalentFrameCloseButton:HookScript("OnEnter", function(self)
-			local closeTex = _G[self:GetName().."CloseTex"];
-			if ( closeTex ) then
-				closeTex:SetAlpha(1)
-			end
-		end);
-		PlayerTalentFrameCloseButton:HookScript("OnLeave", function(self)
-			local closeTex = _G[self:GetName().."CloseTex"];
-			if ( closeTex ) then
-				closeTex:SetAlpha(.60)
-			end
-		end);
+	if ( PlayerTalentFrameActivateButton ) then
+		PlayerTalentFrameActivateButton.originalPoints = {};
+		for i = 1, PlayerTalentFrameActivateButton:GetNumPoints() do
+			local point, relativeTo, relativePoint, offsetX, offsetY = PlayerTalentFrameActivateButton:GetPoint(i);
+			PlayerTalentFrameActivateButton.originalPoints[i] = {
+				point = point,
+				relativeTo = relativeTo,
+				relativePoint = relativePoint,
+				offsetX = offsetX,
+				offsetY = offsetY,
+			};
+		end
 	end
 
 	-- Reskin tabs
@@ -1573,82 +2067,6 @@ function PlayerTalentFrame_OnLoad(self)
 		end
 	end
 	
-	-- Create spec dropdown button
-	if ( not _G["PlayerTalentFrameSpecDropdown"] ) then
-		local dropdownButton = CreateFrame("Button", "PlayerTalentFrameSpecDropdown", self);
-		dropdownButton:SetSize(150, 24);
-		dropdownButton:SetPoint("TOPLEFT", self, "TOPLEFT", 29, -24);
-		
-		-- Create backdrop (no border)
-		dropdownButton:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			tile = true,
-			tileSize = 8,
-			insets = { left = 0, right = 0, top = 0, bottom = 0 }
-		});
-		dropdownButton:SetBackdropColor(0, 0, 0, 0.75);
-		
-		-- Create text for selected spec (no "Spec:" label)
-		local text = dropdownButton:CreateFontString(nil, "OVERLAY", "GameFontNormal");
-		text:SetPoint("LEFT", dropdownButton, "LEFT", 10, 0);
-		text:SetPoint("RIGHT", dropdownButton, "RIGHT", -25, 0);
-		text:SetJustifyH("LEFT");
-		text:SetText("Select Spec");
-		dropdownButton.text = text;
-		
-		-- Create dropdown arrow
-		local arrow = dropdownButton:CreateTexture(nil, "OVERLAY");
-		arrow:SetTexture("Interface\\FrameGeneral\\arrowup");
-		arrow:SetTexCoord(0, 1, 1, 0);
-		arrow:SetSize(18, 18);
-		arrow:SetPoint("RIGHT", dropdownButton, "RIGHT", -5, 0);
-		arrow:SetVertexColor(1, .8, 0)
-		dropdownButton.arrow = arrow;
-		
-		-- Create dropdown menu frame
-		local menuFrame = CreateFrame("Frame", "PlayerTalentFrameSpecDropdownMenu", UIParent);
-		-- Set strata and frame level once when creating - keep static
-		menuFrame:SetFrameStrata("FULLSCREEN_DIALOG");
-		menuFrame:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			tile = true,
-			tileSize = 8,
-			insets = { left = 0, right = 0, top = 0, bottom = 0 }
-		});
-		menuFrame:SetBackdropColor(0, 0, 0, 0.90);
-		menuFrame:Hide();
-		menuFrame:SetMovable(false);
-		menuFrame:EnableMouse(true);
-		menuFrame:SetScript("OnMouseDown", function(self, button)
-			if ( button == "RightButton" ) then
-				menuFrame:Hide();
-			end
-		end);
-		dropdownButton.menuFrame = menuFrame;
-		
-		-- Set click handler
-		dropdownButton:SetScript("OnClick", function(self, button)
-			if ( button == "LeftButton" ) then
-				if ( self.menuFrame and self.menuFrame:IsShown() ) then
-					self.menuFrame:Hide();
-				else
-					PlayerTalentFrameSpecDropdown_ShowMenu(self);
-				end
-			end
-		end);
-		
-		-- Close menu when PlayerTalentFrame is hidden
-		self:HookScript("OnHide", function()
-			if ( dropdownButton.menuFrame ) then
-				dropdownButton.menuFrame:Hide();
-			end
-		end);
-		
-		-- Hide by default, will be shown when needed
-		dropdownButton:Hide();
-		self.specDropdown = dropdownButton;
-	end
-	
 	-- Create Reset button on the far left of the points bar
 	if ( not _G["PlayerTalentFramePointsBarResetButton"] ) then
 		local resetButton = CreateFrame("Button", "PlayerTalentFramePointsBarResetButton", _G["PlayerTalentFramePointsBar"], "UIPanelButtonTemplate");
@@ -1659,10 +2077,35 @@ function PlayerTalentFrame_OnLoad(self)
 		-- Set button scripts
 		resetButton:SetScript("OnClick", function(self, button)
 			if ( button == "LeftButton" ) then
+				local previousSpecKey = selectedSpec;
+				local previousSelectedNumber = selectedSpecNumber;
+				local previousFrameGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or nil;
+				local previousTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
 				-- Send message to server with opcode 10
 				local resetOpCode = 10;
 				local fullMessage = string.format("%d|", resetOpCode);
 				PushMessageToServer(fullMessage);
+				if ( previousSpecKey ) then
+					selectedSpec = previousSpecKey;
+				end
+				if ( type(previousSelectedNumber) == "number" and previousSelectedNumber > 0 ) then
+					selectedSpecNumber = previousSelectedNumber;
+				end
+				if ( PlayerTalentFrame ) then
+					if ( type(previousFrameGroup) == "number" and previousFrameGroup > 0 ) then
+						PlayerTalentFrame.talentGroup = previousFrameGroup;
+					end
+					if ( type(previousTab) == "number" ) then
+						PanelTemplates_SetTab(PlayerTalentFrame, previousTab);
+					end
+				end
+				PlayerTalentFrame_UpdateSpecTabChecks();
+				if ( type(PlayerTalentFrame_Refresh) == "function" ) then
+					PlayerTalentFrame_Refresh();
+				end
+				if ( PlayerTalentFrame and previousSpecKey and specTabs[previousSpecKey] ) then
+					specTabs[previousSpecKey]:SetChecked(true);
+				end
 			end
 		end);
 		
@@ -1738,40 +2181,24 @@ function PlayerTalentFrame_OnShow(self)
 
 	-- For player talents (not inspect, not pet), ensure we show the active spec
 	if ( not self.inspect and not self.pet ) then
-		-- Get the active spec number (from decoded message or base API)
-		local activeSpecNum = _G["activeSpecNumber"];
+		local specMapReady = SpecMap_TalentCacheIsReady and SpecMap_TalentCacheIsReady() or false;
+		local activeSpecNum = SpecMap_GetActiveTalentGroup();
 		if ( type(activeSpecNum) ~= "number" or activeSpecNum <= 0 ) then
-			-- Fallback to base game API
 			activeSpecNum = GetActiveTalentGroup(self.inspect, self.pet);
 			if ( not activeSpecNum or activeSpecNum <= 0 ) then
 				activeSpecNum = 1;
 			end
 		end
-		
-		-- Always set selectedSpecNumber and talentGroup to active spec when showing the frame
-		-- This ensures the talent tree shows the active spec's trees
-		-- Set these BEFORE any refresh/update calls
+
 		selectedSpecNumber = activeSpecNum;
-		self.talentGroup = activeSpecNum;
-		
-		-- For player talents with dropdown, bypass the old spec tab system
-		-- Just refresh directly with the correct talentGroup set
-		PlayerTalentFrame_Refresh();
-		
-		-- Ensure talentGroup is still set correctly after refresh (in case something reset it)
-		-- This is a safeguard to prevent the talent tree from resetting to spec 1
-		if ( type(selectedSpecNumber) == "number" ) then
-			self.talentGroup = selectedSpecNumber;
-		end
-		
-		-- Force update the talent frame with the correct talentGroup
-		if ( type(TalentFrame_Update) == "function" ) then
-			TalentFrame_Update(self);
-		end
-		
-		-- Update dropdown to show the active spec
-		if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-			PlayerTalentFrameSpecDropdown_Update();
+		selectedSpec = "spec" .. selectedSpecNumber;
+		self.talentGroup = selectedSpecNumber;
+		pendingActiveSpecSelection = selectedSpecNumber;
+
+		if ( specMapReady ) then
+			PlayerTalentFrame_SelectSpecByKey("spec"..selectedSpecNumber, true);
+			PlayerTalentFrame_Refresh();
+			pendingActiveSpecSelection = nil;
 		end
 	else
 		-- For pet/inspect, use the old spec tab system
@@ -1825,14 +2252,25 @@ function PlayerTalentFrame_OnEvent(self, event, ...)
 	elseif ( event == "UNIT_PET" ) then
 		local summoner = ...;
 		if ( summoner == "player" ) then
-			if ( selectedSpec and specs[selectedSpec].pet ) then
-				-- if the selected spec is a pet spec...
-				local numTalentGroups = GetNumTalentGroups(false, true);
-				if ( numTalentGroups == 0 ) then
-					--...and a pet spec is not available, select the default spec
-					PlayerSpecTab_OnClick(activeSpec and specTabs[activeSpec] or specTabs[DEFAULT_TALENT_SPEC]);
-					return;
+			local numPetTalentGroups = GetNumTalentGroups(false, true) or 0;
+			if ( numPetTalentGroups == 0 ) then
+				local targetSpec = SpecMap_GetActiveTalentGroup();
+				if ( type(targetSpec) ~= "number" or targetSpec <= 0 ) then
+					targetSpec = GetActiveTalentGroup(false, false);
+					if ( not targetSpec or targetSpec <= 0 ) then
+						targetSpec = 1;
+					end
 				end
+				selectedSpecNumber = targetSpec;
+				selectedSpec = "spec" .. targetSpec;
+				pendingActiveSpecSelection = nil;
+				PlayerTalentFrame_SelectSpecByKey("spec" .. targetSpec, true);
+				PlayerTalentFrame_Refresh();
+				return;
+			end
+			if ( selectedSpec and specs[selectedSpec].pet ) then
+				PlayerTalentFrame_Refresh();
+				return;
 			end
 			PlayerTalentFrame_Refresh();
 		end
@@ -1864,6 +2302,7 @@ function PlayerTalentFrame_Refresh()
 	end
 	
 	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
+	local shouldUpdateTalentFrame = false;
 	if ( selectedTab == GLYPH_TALENT_TAB ) then
 		PlayerTalentFrame_ShowGlyphFrame();
 		-- Update controls for glyph view (ShowGlyphFrame already calls this, but ensure it's called)
@@ -1882,9 +2321,7 @@ function PlayerTalentFrame_Refresh()
 	else
 		PlayerTalentFrame_HideGlyphFrame();
 		-- Update the talent frame display when viewing talents
-		if ( type(TalentFrame_Update) == "function" ) then
-			TalentFrame_Update(PlayerTalentFrame);
-		end
+		shouldUpdateTalentFrame = true;
 		-- Also update controls
 		local activeTalentGroup;
 		local numTalentGroups;
@@ -1900,12 +2337,9 @@ function PlayerTalentFrame_Refresh()
 		end
 	end
 	
-	-- Update spec dropdown position and visibility
-	if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-		PlayerTalentFrameSpecDropdown_Update();
+	if ( shouldUpdateTalentFrame and type(TalentFrame_Update) == "function" ) then
+		TalentFrame_Update(PlayerTalentFrame);
 	end
-	
-	TalentFrame_Update(PlayerTalentFrame);
 end
 
 function PlayerTalentFrame_Update(playerLevel)
@@ -1980,12 +2414,6 @@ function PlayerTalentFrame_Update(playerLevel)
 	-- update talent controls
 	PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups);
 	
-	-- Update spec dropdown to reflect any changes to active spec
-	if ( not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
-		if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-			PlayerTalentFrameSpecDropdown_Update();
-		end
-	end
 end
 
 function PlayerTalentFrame_UpdateActiveSpec(activeTalentGroup, numTalentGroups)
@@ -2229,8 +2657,10 @@ function PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups)
 			if ( GlyphFrame and GlyphFrame:IsShown() ) then
 				local glyphFrameLevel = GlyphFrame:GetFrameLevel();
 				PlayerTalentFrameActivateButton:SetFrameLevel(glyphFrameLevel + 1);
-				PlayerTalentFrameActivateButton:SetPoint("TOP", GlyphFrameTitleText, "BOTTOM", 0, -8);
 			end
+			local anchor = PlayerTalentFrameTitleText or PlayerTalentFrame;
+			PlayerTalentFrameActivateButton:ClearAllPoints();
+			PlayerTalentFrameActivateButton:SetPoint("TOP", anchor, "BOTTOM", 0, -8);
 		else
 			-- Position activate button in same position as status frame (relative to title text)
 			if ( titleText ) then
@@ -2260,10 +2690,6 @@ function PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups)
 				if ( GlyphFrame and GlyphFrame:IsShown() ) then
 					local glyphFrameLevel = GlyphFrame:GetFrameLevel();
 					PlayerTalentFrameStatusFrame:SetFrameLevel(glyphFrameLevel + 1);
-					PlayerTalentFrameActivateButton:SetPoint("TOP", GlyphFrameTitleText, "BOTTOM", 0, -8);
-				else
-					-- If glyph frame exists but isn't shown yet, use a high frame level
-					PlayerTalentFrameStatusFrame:SetFrameLevel(PlayerTalentFrame:GetFrameLevel() + 5);
 				end
 			end
 			PlayerTalentFrameStatusFrame:Show();
@@ -2394,15 +2820,15 @@ function PlayerTalentFrameActivateButton_OnEvent(self, event, ...)
 end
 
 function PlayerTalentFrameActivateButton_Update()
-	local spec = selectedSpec and specs[selectedSpec];
-	if ( spec and PlayerTalentFrameActivateButton:IsShown() ) then
-		-- if the activation spell is being cast currently, disable the activate button
-		if ( IsCurrentSpell(TALENT_ACTIVATION_SPELLS[spec.talentGroup]) ) then
-			PlayerTalentFrameActivateButton:Disable();
-		else
-			PlayerTalentFrameActivateButton:Enable();
-		end
-	end
+	-- local spec = selectedSpec and specs[selectedSpec];
+	-- if ( spec and PlayerTalentFrameActivateButton:IsShown() ) then
+	-- 	-- if the activation spell is being cast currently, disable the activate button
+	-- 	if ( IsCurrentSpell(TALENT_ACTIVATION_SPELLS[spec.talentGroup]) ) then
+	-- 		PlayerTalentFrameActivateButton:Disable();
+	-- 	else
+	-- 		PlayerTalentFrameActivateButton:Enable();
+	-- 	end
+	-- end
 end
 
 -- PlayerTalentFrameResetButton_OnEnter and PlayerTalentFrameResetButton_OnLeave removed
@@ -2759,107 +3185,73 @@ end
 -- Returns true on a successful update, false otherwise. An update may fail if the currently
 -- selected tab is no longer selectable. In this case, the first selectable tab will be selected.
 function PlayerTalentFrame_UpdateSpecs(activeTalentGroup, numTalentGroups, activePetTalentGroup, numPetTalentGroups)
-	-- Hide PlayerSpecTabs for player talents (we use dropdown instead)
-	-- BUT show pet spec tabs if the player has a pet
-	-- AND show SpecTab1 when viewing pet talents (so it can switch back to player view)
-	if ( not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
-		-- Hide non-pet spec tabs (player uses dropdown for those)
-		-- SpecTab1 will be hidden here but will show when viewing pet talents
-		for i = 1, 3 do
-			local frame = _G["PlayerSpecTab"..i];
-			if ( frame ) then
-				local specIndex = frame.specIndex;
-				local spec = specs[specIndex];
-				-- Hide if it's a player spec tab (not a pet spec) and not spec1
-				-- SpecTab1 needs to be available when viewing pet talents
-				if ( spec and not spec.pet and specIndex ~= "spec1" ) then
-					frame:Hide();
-				end
-			end
-		end
-		-- Hide the active spec highlight (only shown for player specs, not pet specs)
-		PlayerTalentFrameActiveSpecTabHighlight:Hide();
-		-- Continue with update logic for pet tabs if player has a pet
-		-- If no pet talent groups, return early (no pet tabs to show)
-		if ( numPetTalentGroups == 0 ) then
-			return true;
-		end
-		-- Otherwise, continue to show pet spec tabs below
-	end
-	
-	-- set the active spec highlight to be hidden initially, if a spec is the active one then it will
-	-- be shown in PlayerSpecTab_Update
 	PlayerTalentFrameActiveSpecTabHighlight:Hide();
 
-	-- update each of the spec tabs
+	local orderedTabs = PlayerTalentFrame_GetOrderedSpecTabs();
 	local firstShownTab, lastShownTab;
-	local numShown = 0;
-	local offsetX = 0;
-	for i = 1, numSpecTabs do
-		local frame = _G["PlayerSpecTab"..i];
-		local specIndex = frame.specIndex;
-		local spec = specs[specIndex];
+
+	for _, frame in ipairs(orderedTabs) do
+		local specKey = frame.specIndex;
+		local spec = specs[specKey];
 		if ( PlayerSpecTab_Update(frame, activeTalentGroup, numTalentGroups, activePetTalentGroup, numPetTalentGroups) ) then
 			firstShownTab = firstShownTab or frame;
-			numShown = numShown + 1;
 			frame:ClearAllPoints();
-			-- set an offsetX fudge if we're the selected tab, otherwise use the previous offsetX
-			offsetX = specIndex == selectedSpec and SELECTEDSPEC_OFFSETX or offsetX;
-			if ( numShown == 1 ) then
-				--...start the first tab off at a base location
+
+			local offsetX = (specKey == selectedSpec) and SELECTEDSPEC_OFFSETX or 0;
+			if ( not lastShownTab ) then
 				frame:SetPoint("TOPLEFT", frame:GetParent(), "TOPRIGHT", -32 + offsetX, -65);
-				-- we'll need to negate the offsetX after the first tab so all subsequent tabs offset
-				-- to their default positions
-				offsetX = -offsetX;
 			else
-				--...offset subsequent tabs from the previous one
-				if ( spec.pet ~= specs[lastShownTab.specIndex].pet ) then
-					frame:SetPoint("TOPLEFT", lastShownTab, "BOTTOMLEFT", 0 + offsetX, -39);
-				else
-					frame:SetPoint("TOPLEFT", lastShownTab, "BOTTOMLEFT", 0 + offsetX, -22);
-				end
+				local previousSpec = specs[lastShownTab.specIndex];
+				local verticalSpacing = -6;
+				frame:SetPoint("TOPLEFT", lastShownTab, "BOTTOMLEFT", offsetX, verticalSpacing);
 			end
 			lastShownTab = frame;
 		else
 			-- if the selected tab is not shown then clear out the selected spec
-			if ( specIndex == selectedSpec ) then
+			if ( specKey == selectedSpec ) then
 				selectedSpec = nil;
 			end
 		end
 	end
 
 	if ( not selectedSpec ) then
-		-- For player talents, if we're using the dropdown system, don't auto-select a spec tab
-		-- This prevents switching back to pet view when clicking SpecTab1 to switch to player view
-		if ( not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
-			-- Player talents use dropdown - don't auto-select a spec tab
-			-- Just return true to continue with the update
-			return true;
+		local handled = false;
+		if ( pendingActiveSpecSelection ) then
+			local pendingKey = "spec" .. pendingActiveSpecSelection;
+			local pendingFrame = specTabs[pendingKey];
+			if ( pendingFrame and pendingFrame:IsShown() and specs[pendingKey] ) then
+				PlayerTalentFrame_SelectSpecByKey(pendingKey, true);
+				pendingActiveSpecSelection = nil;
+				handled = true;
+			else
+				if ( SpecMap_TalentCacheIsReady and SpecMap_TalentCacheIsReady() ) then
+					pendingActiveSpecSelection = nil;
+				end
+			end
 		end
-		-- For pet/inspect, auto-select the first shown tab
-		if ( firstShownTab ) then
-			PlayerSpecTab_OnClick(firstShownTab);
+		if ( not handled ) then
+			local activeSpecCandidate = SpecMap_GetActiveTalentGroup();
+			if ( type(activeSpecCandidate) ~= "number" or activeSpecCandidate <= 0 ) then
+				activeSpecCandidate = GetActiveTalentGroup(false, false);
+				if ( not activeSpecCandidate or activeSpecCandidate <= 0 ) then
+					activeSpecCandidate = nil;
+				end
+			end
+			if ( activeSpecCandidate ) then
+				local activeKey = "spec" .. activeSpecCandidate;
+				local activeFrame = specTabs[activeKey];
+				if ( activeFrame and activeFrame:IsShown() and specs[activeKey] ) then
+					PlayerTalentFrame_SelectSpecByKey(activeKey, true);
+					handled = true;
+				end
+			end
 		end
-		return false;
+		if ( not handled and firstShownTab ) then
+			PlayerTalentFrame_SelectSpecByKey(firstShownTab.specIndex, true);
+		end
 	end
 
-	if ( numShown == 1 and lastShownTab ) then
-		-- If we're only showing one tab, hide it since it doesn't need to be there
-		-- EXCEPT if it's a pet tab when viewing player talents (player might want to switch between player and pet)
-		-- OR if it's SpecTab1 when viewing pet talents (needed to switch back to player view)
-		local specIndex = lastShownTab.specIndex;
-		local spec = specs[specIndex];
-		if ( specIndex == "spec1" and PlayerTalentFrame.pet ) then
-			-- Keep SpecTab1 visible when viewing pet talents so player can switch back
-			-- Don't hide it
-		elseif ( spec and spec.pet and not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
-			-- Keep pet tab visible when viewing player talents (player might want to switch between player and pet)
-			-- Don't hide it
-		else
-			-- Hide the single tab
-			lastShownTab:Hide();
-		end
-	end
+	PlayerTalentFrame_UpdateSpecTabChecks();
 
 	return true;
 end
@@ -2867,45 +3259,49 @@ end
 function PlayerSpecTab_Update(self, ...)
 	local activeTalentGroup, numTalentGroups, activePetTalentGroup, numPetTalentGroups = ...;
 
-	local specIndex = self.specIndex;
-	local spec = specs[specIndex];
+	local specKey = self.specIndex;
+	local spec = specs[specKey];
 
-	-- Hide SpecTab2 (spec2) - it's no longer needed
-	if ( specIndex == "spec2" ) then
+	if ( not spec ) then
 		self:Hide();
 		return false;
 	end
 
-	-- Hide PlayerSpecTabs for player talents (we use dropdown instead)
-	-- BUT allow pet spec tabs to show when viewing player talents
-	-- AND allow SpecTab1 to show when viewing pet talents (so it can switch back to player view)
-	if ( not PlayerTalentFrame.inspect and not PlayerTalentFrame.pet ) then
-		-- When viewing player talents: hide spec1 (we use dropdown), but allow pet tabs
-		if ( specIndex == "spec1" ) then
-			self:Hide();
-			return false;
-		end
-		-- Pet spec tabs are allowed to show when viewing player talents (if player has a pet)
-		-- No need to hide them here - they'll be shown if numPetTalentGroups > 0
-	end
-	-- When viewing pet talents: SpecTab1 will be shown (handled by normal logic below)
-	-- Pet spec tabs are allowed to show when viewing player talents (if player has a pet)
-	-- SpecTab1 is allowed to show when viewing pet talents (to switch back to player view)
-
-	-- determine whether or not we need to hide the tab
 	local canShow;
 	if ( spec.pet ) then
-		canShow = spec.talentGroup <= numPetTalentGroups;
+		canShow = (numPetTalentGroups or 0) > 0 and spec.talentGroup <= numPetTalentGroups;
 	else
-		canShow = spec.talentGroup <= numTalentGroups;
+		canShow = (numTalentGroups or 0) > 0 and spec.talentGroup <= numTalentGroups;
 	end
+
 	if ( not canShow ) then
+		if ( specKey == selectedSpec and spec ) then
+			if ( spec.pet ) then
+				local activePlayerSpec = SpecMap_GetActiveTalentGroup();
+				if ( type(activePlayerSpec) ~= "number" or activePlayerSpec <= 0 ) then
+					activePlayerSpec = GetActiveTalentGroup(false, false);
+					if ( not activePlayerSpec or activePlayerSpec <= 0 ) then
+						activePlayerSpec = 1;
+					end
+				end
+				pendingActiveSpecSelection = activePlayerSpec;
+			else
+				pendingActiveSpecSelection = spec.talentGroup;
+			end
+		end
 		self:Hide();
 		return false;
 	end
 
-	local isSelectedSpec = specIndex == selectedSpec;
-	local isActiveSpec = not spec.pet and spec.talentGroup == activeTalentGroup;
+	self:Show();
+
+	local isSelectedSpec = (specKey == selectedSpec);
+	local isActiveSpec;
+	if ( spec.pet ) then
+		isActiveSpec = spec.talentGroup == activePetTalentGroup;
+	else
+		isActiveSpec = spec.talentGroup == activeTalentGroup;
+	end
 	local normalTexture = self:GetNormalTexture();
 
 	-- set the background based on whether or not we're selected
@@ -2924,6 +3320,23 @@ function PlayerSpecTab_Update(self, ...)
 		local backgroundTexture = _G[name.."Background"];
 		backgroundTexture:SetTexture("Interface\\SpellBook\\SpellBook-SkillLineTab");
 		backgroundTexture:SetPoint("TOPLEFT", self, "TOPLEFT", -3, 11);
+	end
+
+	-- set the selection visuals
+	local checkedTexture = self:GetCheckedTexture();
+	if ( SELECTEDSPEC_DISPLAYTYPE == "PUSHED_OUT_CHECKED" ) then
+		if ( isSelectedSpec and checkedTexture ) then
+			checkedTexture:Show();
+		elseif ( checkedTexture ) then
+			checkedTexture:Hide();
+		end
+	elseif ( checkedTexture ) then
+		checkedTexture:Hide();
+	end
+
+	if ( self.backdropFrame ) then
+		self.backdropFrame:SetBackdropBorderColor(0, 0, 0, 1);
+		self.backdropFrame:SetBackdropColor(0, 0, 0, 1);
 	end
 
 	-- update the active spec info
@@ -2946,6 +3359,11 @@ function PlayerSpecTab_Update(self, ...)
 		else
 			PlayerTalentFrameActiveSpecTabHighlight:Hide();
 		end
+	elseif ( PlayerTalentFrameActiveSpecTabHighlight:GetParent() == self ) then
+		PlayerTalentFrameActiveSpecTabHighlight:Hide();
+		PlayerTalentFrameActiveSpecTabHighlight:SetParent(nil);
+	else
+		PlayerTalentFrameActiveSpecTabHighlight:Hide();
 	end
 
 --[[
@@ -2955,18 +3373,14 @@ function PlayerSpecTab_Update(self, ...)
 --]]
 
 	-- update the spec info cache
-	TalentFrame_UpdateSpecInfoCache(talentSpecInfoCache[specIndex], false, spec.pet, spec.talentGroup);
+	EnsureTalentSpecCacheEntry(specKey);
+	TalentFrame_UpdateSpecInfoCache(talentSpecInfoCache[specKey], false, spec.pet, spec.talentGroup);
 
 	-- update spec tab icon
 	self.usingPortraitTexture = false;
 	
-	-- Special handling for SpecTab1 (spec1): always use player portrait
-	if ( specIndex == "spec1" ) then
-		-- Always use player portrait for SpecTab1
-		SetPortraitTexture(normalTexture, "player");
-		self.usingPortraitTexture = true;
-	elseif ( hasMultipleTalentGroups ) then
-		local specInfoCache = talentSpecInfoCache[specIndex];
+	if ( hasMultipleTalentGroups ) then
+		local specInfoCache = talentSpecInfoCache[specKey];
 		local primaryTabIndex = specInfoCache.primaryTabIndex;
 		if ( primaryTabIndex > 0 ) then
 			-- the spec had a primary tab, set the icon to that tab's icon
@@ -2994,19 +3408,11 @@ function PlayerSpecTab_Update(self, ...)
 			self.usingPortraitTexture = true;
 		end
 	end
---[[
-	-- update overlay icon
-	local name = self:GetName();
-	local overlayIcon = _G[name.."OverlayIcon"];
-	if ( overlayIcon ) then
-		if ( hasMultipleTalentGroups ) then
-			overlayIcon:Show();
-		else
-			overlayIcon:Hide();
-		end
-	end
---]]
+
 	self:Show();
+	if ( normalTexture ) then
+		normalTexture:SetTexCoord(0.1, 0.9, 0.1, 0.9);
+	end
 	return true;
 end
 
@@ -3014,6 +3420,35 @@ function PlayerSpecTab_Load(self, specIndex)
 	self.specIndex = specIndex;
 	specTabs[specIndex] = self;
 	numSpecTabs = numSpecTabs + 1;
+
+	EnsureTalentSpecCacheEntry(specIndex);
+
+	local numericIndex = string.match(specIndex or "", "^spec(%d+)$");
+	if ( numericIndex ) then
+		local playerIndex = tonumber(numericIndex);
+		playerSpecTabFrames[playerIndex] = self;
+	end
+
+	local legacyBackground = _G[self:GetName().."Background"];
+	if ( legacyBackground ) then
+		legacyBackground:Hide();
+		legacyBackground:SetTexture(nil);
+	end
+
+	if ( not self.backdropFrame ) then
+		local backdrop = CreateFrame("Frame", nil, self, nil);
+		backdrop:SetFrameLevel(self:GetFrameLevel() - 1);
+		backdrop:SetPoint("TOPLEFT", self, "TOPLEFT", -1, 1);
+		backdrop:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 1, -1);
+		backdrop:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Buttons\\WHITE8X8",
+			edgeSize = 1,
+		});
+		backdrop:SetBackdropColor(0, 0, 0, 1);
+		backdrop:SetBackdropBorderColor(0, 0, 0, 1);
+		self.backdropFrame = backdrop;
+	end
 
 	-- set the spec's portrait
 	local spec = specs[self.specIndex];
@@ -3037,6 +3472,11 @@ function PlayerSpecTab_Load(self, specIndex)
 		checkedTexture:SetTexture("Interface\\Buttons\\CheckButtonHilight");
 	end
 
+	local normalTexture = self:GetNormalTexture();
+	if ( normalTexture ) then
+		normalTexture:SetTexCoord(0.1, 0.9, 0.1, 0.9);
+	end
+
 	local activeTalentGroup;
 	local numTalentGroups;
 	if ( PlayerTalentFrame and PlayerTalentFrame.inspect ) then
@@ -3050,221 +3490,87 @@ function PlayerSpecTab_Load(self, specIndex)
 end
 
 function PlayerSpecTab_OnClick(self)
-	-- set all specs as unchecked initially
-	for _, frame in next, specTabs do
-		frame:SetChecked(nil);
+	if ( not self or not self.specIndex ) then
+		return;
 	end
 
-	-- check ourselves (before we wreck ourselves)
-	self:SetChecked(1);
-
-	-- update the selected to this spec
-	local specIndex = self.specIndex;
-	
-	-- Special handling for SpecTab1 (spec1): always switch to player talent view
-	if ( specIndex == "spec1" ) then
-		selectedSpec = nil; -- Clear selected spec since we're using dropdown for player talents
-		
-		-- CRITICAL: Set all state BEFORE any update functions are called
-		-- This ensures renderAllTabs will be calculated correctly
-		
-		-- Switch to player talent view
-		PlayerTalentFrame.pet = false;
-		PlayerTalentFrame.inspect = false;
-		PlayerTalentFrame.unit = "player";
-		
-		-- Set talent group to active spec (from dropdown system) BEFORE setting tab
-		local activeSpecNum = _G["activeSpecNumber"];
-		if ( type(activeSpecNum) == "number" and activeSpecNum > 0 ) then
-			PlayerTalentFrame.talentGroup = activeSpecNum;
-			selectedSpecNumber = activeSpecNum;
-		else
-			-- Fallback to base game API
-			local activeTalentGroup = GetActiveTalentGroup(false, false);
-			if ( activeTalentGroup and activeTalentGroup > 0 ) then
-				PlayerTalentFrame.talentGroup = activeTalentGroup;
-				selectedSpecNumber = activeTalentGroup;
-			else
-				PlayerTalentFrame.talentGroup = 1;
-				selectedSpecNumber = 1;
-			end
-		end
-		
-		-- Ensure we're on the talents tab (not glyphs tab) - this must be set before updates
-		-- Set tab to 1 (talents) explicitly, which will make renderAllTabs = true
-		PanelTemplates_SetTab(PlayerTalentFrame, 1);
-		
-		-- Hide glyph frame if it's showing (we're switching to player talents)
-		if ( type(PlayerTalentFrame_HideGlyphFrame) == "function" ) then
-			PlayerTalentFrame_HideGlyphFrame();
-		end
-		
-		-- Explicitly hide scroll frame and show grid container for player talents
-		local scrollFrame = _G["PlayerTalentFrameScrollFrame"];
-		local gridContainer = _G["PlayerTalentFrameGridContainer"];
-		if ( scrollFrame ) then
-			scrollFrame:Hide();
-		end
-		if ( gridContainer ) then
-			gridContainer:Show();
-		end
-		
-		-- Show and update the spec dropdown
-		if ( type(PlayerTalentFrameSpecDropdown_Update) == "function" ) then
-			local dropdownButton = _G["PlayerTalentFrameSpecDropdown"];
-			if ( dropdownButton ) then
-				dropdownButton:Show();
-			end
-			PlayerTalentFrameSpecDropdown_Update();
-		end
-	else
-		-- For pet spec tabs, use normal behavior
-		selectedSpec = specIndex;
-		local spec = specs[specIndex];
-		PlayerTalentFrame.pet = spec.pet;
-		PlayerTalentFrame.unit = spec.unit;
-		PlayerTalentFrame.talentGroup = spec.talentGroup;
-		
-		-- select a tab if one is not already selected
-		if ( not PanelTemplates_GetSelectedTab(PlayerTalentFrame) ) then
-			PanelTemplates_SetTab(PlayerTalentFrame, PlayerTalentTab_GetBestDefaultTab(specIndex));
-		end
-	end
-
-	-- Force a full refresh to update the view
-	-- For spec1, we need to ensure the view actually switches from pet to player
-	if ( specIndex == "spec1" ) then
-		-- Verify state is correct before updating
-		-- Ensure all state variables are set correctly
-		PlayerTalentFrame.pet = false;
-		PlayerTalentFrame.inspect = false;
-		PlayerTalentFrame.unit = "player";
-		
-		-- Verify tab is set to 1 (talents, not glyphs)
-		local currentTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-		if ( currentTab ~= 1 ) then
-			PanelTemplates_SetTab(PlayerTalentFrame, 1);
-		end
-		
-		-- Ensure glyph frame is hidden
-		if ( type(PlayerTalentFrame_HideGlyphFrame) == "function" ) then
-			PlayerTalentFrame_HideGlyphFrame();
-		end
-		
-		-- Explicitly hide scroll frame and show grid container (again, to be safe)
-		local scrollFrame = _G["PlayerTalentFrameScrollFrame"];
-		local gridContainer = _G["PlayerTalentFrameGridContainer"];
-		if ( scrollFrame ) then
-			scrollFrame:Hide();
-		end
-		if ( gridContainer ) then
-			gridContainer:Show();
-			-- Also show all grid columns
-			local col1 = _G["PlayerTalentFrameGridColumn1"];
-			local col2 = _G["PlayerTalentFrameGridColumn2"];
-			local col3 = _G["PlayerTalentFrameGridColumn3"];
-			if ( col1 ) then col1:Show(); end
-			if ( col2 ) then col2:Show(); end
-			if ( col3 ) then col3:Show(); end
-		end
-		
-		-- IMPORTANT: Call PlayerTalentFrame_Refresh first to update the frame state
-		-- Then call TalentFrame_Update to render the grid
-		-- The refresh will update controls and dropdown, but we need to ensure the grid renders
-		
-		-- Verify state one more time before refreshing
-		local verifyTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-		if ( verifyTab ~= 1 ) then
-			-- Force tab to 1 if it's not already set
-			PanelTemplates_SetTab(PlayerTalentFrame, 1);
-		end
-		
-		-- Ensure pet is false (this is critical for renderAllTabs calculation)
-		PlayerTalentFrame.pet = false;
-		PlayerTalentFrame.inspect = false;
-		
-		-- Call refresh first - this will update the frame but TalentFrame_Update at the end might override
-		-- So we need to call it again after
-		PlayerTalentFrame_Refresh();
-		
-		-- Now explicitly call TalentFrame_Update to ensure the grid is rendered
-		-- IMPORTANT: Temporarily disable updateFunction to prevent it from resetting state
-		-- The updateFunction (PlayerTalentFrame_Update) might reset things during the update
-		local originalUpdateFunction = PlayerTalentFrame.updateFunction;
-		PlayerTalentFrame.updateFunction = nil;
-		
-		-- Re-assert state before calling TalentFrame_Update
-		PlayerTalentFrame.pet = false;
-		PlayerTalentFrame.inspect = false;
-		local verifyTabAgain = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-		if ( verifyTabAgain ~= 1 ) then
-			PanelTemplates_SetTab(PlayerTalentFrame, 1);
-		end
-		
-		-- Now call TalentFrame_Update - this should calculate renderAllTabs = true
-		-- because: not inspect (true) and not pet (true) and selectedTab ~= 4 (true)
-		if ( type(TalentFrame_Update) == "function" ) then
-			TalentFrame_Update(PlayerTalentFrame);
-		end
-		
-		-- Restore updateFunction
-		PlayerTalentFrame.updateFunction = originalUpdateFunction;
-	else
-		-- For pet spec tabs, just refresh normally
-		PlayerTalentFrame_Refresh();
-	end
+	PlayerTalentFrame_SelectSpecByKey(self.specIndex);
 end
 
 function PlayerSpecTab_OnEnter(self)
-	local specIndex = self.specIndex;
-	local spec = specs[specIndex];
-	if ( spec.tooltip ) then
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-		-- Special handling for SpecTab1 (spec1): always show "Player Talents"
-		if ( specIndex == "spec1" ) then
-			GameTooltip:AddLine("Player Talents", NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b);
-			-- Don't show points spent for SpecTab1
+	local specKey = self.specIndex;
+	local spec = specs[specKey];
+	if ( not spec ) then
+		return;
+	end
+
+	local activePlayerGroup;
+	if ( type(activeSpecNumber) == "number" and activeSpecNumber > 0 ) then
+		activePlayerGroup = activeSpecNumber;
+	else
+		local specMapActive = SpecMap_GetActiveTalentGroup();
+		if ( type(specMapActive) == "number" and specMapActive > 0 ) then
+			activePlayerGroup = specMapActive;
 		else
-			-- name
-			local playerNumTalentGroups;
-			if ( PlayerTalentFrame and PlayerTalentFrame.inspect ) then
-				playerNumTalentGroups = GetNumTalentGroups(false, false);
-			else
-				playerNumTalentGroups = SpecMap_GetTalentGroupCount();
-			end
-			if ( GetNumTalentGroups(false, true) <= 1 and playerNumTalentGroups <= 1 ) then
-				-- set the tooltip to be the unit's name
-				GameTooltip:AddLine(UnitName(spec.unit), NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b);
-			else
-				-- set the tooltip to be the spec name
-				GameTooltip:AddLine(spec.tooltip);
-				if ( self.specIndex == activeSpec ) then
-					-- add text to indicate that this spec is active
-					GameTooltip:AddLine(TALENT_ACTIVE_SPEC_STATUS, GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b);
-				end
-			end
-			-- points spent (only show for non-spec1 tabs)
-			local pointsColor;
-			for index, info in ipairs(talentSpecInfoCache[specIndex]) do
-				if ( info.name ) then
-					-- assign a special color to a tab that surpasses the max points spent threshold
-					if ( talentSpecInfoCache[specIndex].primaryTabIndex == index ) then
-						pointsColor = GREEN_FONT_COLOR;
-					else
-						pointsColor = HIGHLIGHT_FONT_COLOR;
-					end
-					GameTooltip:AddDoubleLine(
-						info.name,
-						info.pointsSpent,
-						HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b,
-						pointsColor.r, pointsColor.g, pointsColor.b,
-						1
-					);
-				end
+			local baseActive = GetActiveTalentGroup(false, false);
+			if ( type(baseActive) == "number" and baseActive > 0 ) then
+				activePlayerGroup = baseActive;
 			end
 		end
-		GameTooltip:Show();
 	end
+
+	local activePetGroup = GetActiveTalentGroup(false, true);
+
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+
+	if ( spec.pet ) then
+		local playerNumTalentGroups;
+		if ( PlayerTalentFrame and PlayerTalentFrame.inspect ) then
+			playerNumTalentGroups = GetNumTalentGroups(false, false);
+		else
+			playerNumTalentGroups = SpecMap_GetTalentGroupCount();
+		end
+
+		if ( GetNumTalentGroups(false, true) <= 1 and playerNumTalentGroups <= 1 ) then
+			GameTooltip:AddLine(UnitName(spec.unit), NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b);
+		else
+			GameTooltip:AddLine(spec.tooltip or TALENT_SPEC_PET_PRIMARY);
+			if ( type(activePetGroup) == "number" and spec.talentGroup == activePetGroup ) then
+				GameTooltip:AddLine(TALENT_ACTIVE_SPEC_STATUS, GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b);
+			end
+		end
+	else
+		local specNumber = spec.talentGroup or tonumber(string.match(specKey or "", "^spec(%d+)$")) or 1;
+		GameTooltip:AddLine(GetOrdinalSpecName(specNumber), NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b);
+		if ( type(activePlayerGroup) == "number" and spec.talentGroup == activePlayerGroup ) then
+			GameTooltip:AddLine(TALENT_ACTIVE_SPEC_STATUS, GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b);
+		end
+	end
+
+	local totals = specTreeTotals[specKey];
+	local cache = talentSpecInfoCache[specKey];
+	if ( cache ) then
+		local pointsColor;
+		for index, info in ipairs(cache) do
+			if ( info.name ) then
+				local pointsSpent = totals and totals[index] or info.pointsSpent;
+				if ( cache.primaryTabIndex == index ) then
+					pointsColor = GREEN_FONT_COLOR;
+				else
+					pointsColor = HIGHLIGHT_FONT_COLOR;
+				end
+				GameTooltip:AddDoubleLine(
+					info.name,
+					pointsSpent or 0,
+					HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b,
+					pointsColor.r, pointsColor.g, pointsColor.b,
+					1
+				);
+			end
+		end
+	end
+
+	GameTooltip:Show();
 end
 
 -- Decode Spec Info Message
@@ -3460,7 +3766,6 @@ local function DecodeSpecInfo(message)
     return result
 end
 
-
 -- Export for use in addon
 -- Usage example in a WoW addon:
 --[[
@@ -3509,509 +3814,6 @@ function PushMessageToServer(Msg)
 end
 
 PushMessageToServer("7|GET")
-
--- Spec Dropdown Functions
--- Build or update menu items (called when spec map updates)
-function PlayerTalentFrameSpecDropdown_BuildMenu(dropdownButton)
-	if ( not dropdownButton or not dropdownButton.menuFrame ) then
-		return;
-	end
-	
-	local menuFrame = dropdownButton.menuFrame;
-	local specMap = GetSpecMapTable();
-	
-	if ( not specMap or type(specMap.specs) ~= "table" ) then
-		return;
-	end
-	
-	-- Determine dropdown width based on whether viewing glyphs
-	local dropdownWidth = 150; -- Default width for talents
-	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-	if ( selectedTab == GLYPH_TALENT_TAB ) then
-		dropdownWidth = 75; -- Half width for glyphs
-	end
-	
-	-- Check if we need to rebuild (spec count changed or items don't exist)
-	local currentSpecCount = specMap.specCount or 0;
-	local existingItemCount = menuFrame.menuItems and #menuFrame.menuItems or 0;
-	local needsRebuild = (not menuFrame.menuItems or existingItemCount == 0 or existingItemCount ~= currentSpecCount);
-	
-	-- Clear existing menu items if we need to rebuild
-	if ( needsRebuild and menuFrame.menuItems ) then
-		for _, item in ipairs(menuFrame.menuItems) do
-			if ( item ) then
-				item:Hide();
-				-- Properly clean up old items
-				item:SetParent(nil);
-				item:ClearAllPoints();
-			end
-		end
-		-- Clear the table
-		menuFrame.menuItems = {};
-	end
-	
-	-- Initialize menuItems table if it doesn't exist
-	if ( not menuFrame.menuItems ) then
-		menuFrame.menuItems = {};
-	end
-	
-	-- Only create items if we need to rebuild
-	-- If items already exist and count matches, we'll update colors and width later
-	if ( not needsRebuild ) then
-		-- Update existing items' width based on current view
-		local padding = 4;
-		local itemWidth = dropdownWidth - (padding * 2);
-		for _, item in ipairs(menuFrame.menuItems) do
-			if ( item ) then
-				item:SetWidth(itemWidth);
-			end
-		end
-		-- Items already exist and count matches, just update colors and return
-		PlayerTalentFrameSpecDropdown_UpdateMenuColors();
-		return;
-	end
-	
-	local itemHeight = 20;
-	local padding = 4;
-	local previousItem = nil;
-	
-	-- Create menu items for each spec
-	for specIndex = 1, (specMap.specCount or 0) do
-		local specData = specMap.specs[specIndex];
-		if ( specData ) then
-			local item = CreateFrame("Button", "$parentItem" .. specIndex, menuFrame);
-			item:SetSize(dropdownWidth - (padding * 2), itemHeight);
-			-- Chain items together - first item anchors to menu frame, others anchor to previous item
-			if ( previousItem ) then
-				item:SetPoint("TOPLEFT", previousItem, "BOTTOMLEFT", 0, 0);
-			else
-				item:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", padding, -padding);
-			end
-			
-			-- Ensure the button can receive mouse events by registering for clicks first
-			item:RegisterForClicks("LeftButtonUp", "RightButtonUp");
-			
-			-- Enable mouse events for hover effects
-			item:EnableMouse(true);
-			
-			-- Menu items are children of menuFrame, so they inherit the parent's strata
-			-- Just ensure they're at a higher frame level within that strata
-			-- Don't set strata explicitly - children inherit from parent automatically
-			-- Verify parent is set correctly first (must be set before frame level)
-			if ( item:GetParent() ~= menuFrame ) then
-				item:SetParent(menuFrame);
-			end
-			-- Set frame level relative to menu frame (menu frame level is set to 1000 at creation)
-			-- Use a higher offset to ensure items are above backdrop
-			item:SetFrameLevel(menuFrame:GetFrameLevel() + 10); -- Much higher than menu frame background/backdrop
-			
-			-- Create text (reduced font size)
-			local text = item:CreateFontString("$parentText", "ARTWORK", "GameFontDisableSmall");
-			text:SetAllPoints();
-			text:SetJustifyH("LEFT");
-			text:SetText(GetOrdinalSpecName(specIndex));
-			item.text = text;
-			
-			-- Store spec index on the item for later reference
-			item.specIndex = specIndex;
-			
-			-- Set click handler - use OnClick which is the standard handler for buttons
-			item:SetScript("OnClick", function(self, button)
-				if ( button == "LeftButton" ) then
-					-- Close the dropdown first
-					if ( menuFrame.closeFrame ) then
-						menuFrame.closeFrame:Hide();
-					end
-					menuFrame:Hide();
-					-- Then select the spec
-					PlayerTalentFrameSpecDropdown_SelectSpec(self.specIndex);
-				end
-			end);
-			
-			-- Hover effects - change font color to white on hover
-			item:SetScript("OnEnter", function(self)
-				-- Ensure text exists before setting color
-				local textObj = self.text;
-				if ( textObj ) then
-					textObj:SetTextColor(1, 1, 1, 1); -- White on hover
-				end
-			end);
-			item:SetScript("OnLeave", function(self)
-				-- Ensure text exists before setting color
-				local textObj = self.text;
-				if ( textObj ) then
-					-- Get current selected spec and active spec
-					local currentSelectedSpec = selectedSpecNumber or PlayerTalentFrame.talentGroup or 1;
-					local currentActiveSpec = _G["activeSpecNumber"];
-					local isSelected = (type(currentSelectedSpec) == "number" and self.specIndex == currentSelectedSpec);
-					local isActive = (type(currentActiveSpec) == "number" and self.specIndex == currentActiveSpec);
-					
-					-- Set color: white for selected spec, green for active spec, yellow otherwise
-					if ( isSelected ) then
-						textObj:SetTextColor(1, 1, 1, 1); -- White for selected spec
-					elseif ( isActive ) then
-						textObj:SetTextColor(GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b, 1); -- Green for active spec
-					else
-						textObj:SetTextColor(1.0, 0.82, 0, 1.0); -- Yellow for inactive specs
-					end
-				end
-			end);
-			
-			table.insert(menuFrame.menuItems, item);
-			previousItem = item; -- Store for next iteration
-		end
-	end
-	
-	-- Set menu frame height
-	if ( #menuFrame.menuItems > 0 ) then
-		menuFrame:SetHeight((#menuFrame.menuItems * itemHeight) + (padding * 2));
-		-- Force all items to be properly set up
-		for _, item in ipairs(menuFrame.menuItems) do
-			if ( item ) then
-				-- Ensure parent is correct
-				if ( item:GetParent() ~= menuFrame ) then
-					item:SetParent(menuFrame);
-				end
-				-- Ensure frame level is correct
-				item:SetFrameLevel(menuFrame:GetFrameLevel() + 10);
-			end
-		end
-	else
-		menuFrame:Hide();
-	end
-end
-
--- Update menu item colors based on selected spec and active spec
-function PlayerTalentFrameSpecDropdown_UpdateMenuColors()
-	local dropdownButton = _G["PlayerTalentFrameSpecDropdown"];
-	if ( not dropdownButton or not dropdownButton.menuFrame ) then
-		return;
-	end
-	
-	local menuFrame = dropdownButton.menuFrame;
-	if ( not menuFrame.menuItems ) then
-		return;
-	end
-	
-	-- Get current selected spec (what user is viewing) and active spec (from decoded message)
-	local currentSelectedSpec = selectedSpecNumber or (PlayerTalentFrame and PlayerTalentFrame.talentGroup) or 1;
-	local currentActiveSpec = _G["activeSpecNumber"];
-	
-	for _, item in ipairs(menuFrame.menuItems) do
-		if ( item and item.text ) then
-			local isSelected = (type(currentSelectedSpec) == "number" and item.specIndex == currentSelectedSpec);
-			local isActiveSpec = (type(currentActiveSpec) == "number" and item.specIndex == currentActiveSpec);
-			
-			-- Set color: white for selected spec, green for active spec, yellow otherwise
-			if ( isSelected ) then
-				item.text:SetTextColor(1, 1, 1, 1); -- White for selected spec
-			elseif ( isActiveSpec ) then
-				item.text:SetTextColor(GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b, 1); -- Green for active spec
-			else
-				item.text:SetTextColor(1.0, 0.82, 0, 1.0); -- Yellow for inactive specs
-			end
-		end
-	end
-end
-
--- Show or hide the menu (items are pre-built)
-function PlayerTalentFrameSpecDropdown_ShowMenu(dropdownButton)
-	if ( not dropdownButton or not dropdownButton.menuFrame ) then
-		return;
-	end
-	
-	local menuFrame = dropdownButton.menuFrame;
-	
-	-- Build menu items if they don't exist yet
-	if ( not menuFrame.menuItems or #menuFrame.menuItems == 0 ) then
-		PlayerTalentFrameSpecDropdown_BuildMenu(dropdownButton);
-	end
-	
-	if ( not menuFrame.menuItems or #menuFrame.menuItems == 0 ) then
-		menuFrame:Hide();
-		return;
-	end
-	
-	-- Update menu item colors before showing
-	PlayerTalentFrameSpecDropdown_UpdateMenuColors();
-	
-	-- Determine dropdown width based on whether viewing glyphs
-	local dropdownWidth = 150; -- Default width for talents
-	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-	if ( selectedTab == GLYPH_TALENT_TAB ) then
-		dropdownWidth = 75; -- Half width for glyphs
-	end
-	
-	-- Position menu frame below dropdown button
-	menuFrame:ClearAllPoints();
-	menuFrame:SetPoint("TOPLEFT", dropdownButton, "BOTTOMLEFT", 0, -2);
-	menuFrame:SetWidth(dropdownWidth);
-	
-	-- Update menu item widths to match dropdown width
-	local padding = 4;
-	local itemWidth = dropdownWidth - (padding * 2);
-	
-	-- Show all menu items and ensure they have correct frame levels and parent
-	-- Items are children of menuFrame, so they inherit strata automatically
-	for _, item in ipairs(menuFrame.menuItems) do
-		if ( item ) then
-			-- Update item width to match dropdown width
-			item:SetWidth(itemWidth);
-			-- Ensure parent is set correctly (should be menuFrame) - must be set before frame level
-			if ( item:GetParent() ~= menuFrame ) then
-				item:SetParent(menuFrame);
-			end
-			-- Update frame level to be well above menu frame backdrop (items are children, so they inherit strata)
-			-- Use a higher offset to ensure items are above backdrop which may render at parent level
-			item:SetFrameLevel(menuFrame:GetFrameLevel() + 10);
-			item:Show();
-		end
-	end
-	
-	-- Create or get close frame for clicking outside (only create once)
-	if ( not menuFrame.closeFrame ) then
-		local closeFrame = CreateFrame("Frame", "$parentCloseFrame", UIParent);
-		closeFrame:SetFrameStrata("FULLSCREEN_DIALOG");
-		closeFrame:SetAllPoints();
-		closeFrame:EnableMouse(true);
-		closeFrame:EnableMouseWheel(false);
-		-- Use OnMouseDown to check coordinates, but don't close until OnMouseUp
-		-- This allows menu item OnClick to fire first
-		closeFrame:SetScript("OnMouseDown", function(self, button)
-			-- Store the button for later use
-			self.downButton = button;
-		end);
-		closeFrame:SetScript("OnMouseUp", function(self, button)
-			if ( (button == "LeftButton" or button == "RightButton") and self.downButton == button ) then
-				-- Check what actually received the click
-				local focus = GetMouseFocus();
-				-- Check if focus is menuFrame or one of its children by checking parent chain
-				local isMenuChild = false;
-				if ( focus ) then
-					if ( focus == menuFrame ) then
-						isMenuChild = true;
-					else
-						-- Check parent chain manually (isAncestorOf not available in 3.3.5a)
-						local parent = focus:GetParent();
-						while ( parent ) do
-							if ( parent == menuFrame ) then
-								isMenuChild = true;
-								break;
-							end
-							parent = parent:GetParent();
-						end
-					end
-				end
-				if ( not isMenuChild ) then
-					-- Click was outside, close the menu
-					menuFrame:Hide();
-					self:Hide();
-				end
-			end
-			self.downButton = nil;
-		end);
-		closeFrame:Hide();
-		menuFrame.closeFrame = closeFrame;
-	end
-	
-	-- Show close frame and menu frame
-	if ( menuFrame.closeFrame ) then
-		menuFrame.closeFrame:Show();
-	end
-	menuFrame:Show();
-	
-	-- Hide close frame when menu is hidden
-	menuFrame:SetScript("OnHide", function(self)
-		if ( self.closeFrame ) then
-			self.closeFrame:Hide();
-		end
-	end);
-end
-
-function PlayerTalentFrameSpecDropdown_SelectSpec(specIndex)
-	if ( not PlayerTalentFrame or PlayerTalentFrame.inspect or PlayerTalentFrame.pet ) then
-		return;
-	end
-	
-	-- Set the talent group to view this spec
-	PlayerTalentFrame.talentGroup = specIndex;
-	
-	-- Set the selected spec number (this is what the dropdown controls)
-	selectedSpecNumber = specIndex;
-	
-	-- Note: This does NOT change the active spec (activeSpecNumber remains unchanged)
-	
-	-- Refresh the talent frame to update the display with the new spec's data
-	if ( type(PlayerTalentFrame_Refresh) == "function" ) then
-		PlayerTalentFrame_Refresh();
-	elseif ( type(TalentFrame_Update) == "function" ) then
-		TalentFrame_Update(PlayerTalentFrame);
-	end
-	-- The active spec is only changed by the server message
-	
-	-- Update the dropdown text
-	local dropdownButton = _G["PlayerTalentFrameSpecDropdown"];
-	if ( dropdownButton and dropdownButton.text ) then
-		dropdownButton.text:SetText(GetOrdinalSpecName(specIndex));
-	end
-	
-	-- Update the title text to show the selected spec name
-	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-	if ( selectedTab == GLYPH_TALENT_TAB ) then
-		-- Update glyph title text with spec name (replace "Specialization" with "Glyphs")
-		if ( GlyphFrameTitleText ) then
-			local numTalentGroups = SpecMap_GetTalentGroupCount();
-			if ( numTalentGroups > 1 ) then
-				local specName = GetOrdinalSpecName(specIndex);
-				local glyphTitle = string.gsub(specName, "Specialization", "Glyphs");
-				GlyphFrameTitleText:SetText(glyphTitle);
-			else
-				GlyphFrameTitleText:SetText(GLYPHS);
-			end
-		end
-	else
-		-- Update talent frame title text
-		if ( PlayerTalentFrameTitleText and PlayerTalentFrameTitleText:IsShown() ) then
-			-- Check if viewing pet talents
-			if ( PlayerTalentFrame.pet ) then
-				PlayerTalentFrameTitleText:SetText("Pet Specialization");
-			else
-				local numTalentGroups = SpecMap_GetTalentGroupCount();
-				if ( numTalentGroups > 1 ) then
-					PlayerTalentFrameTitleText:SetText(GetOrdinalSpecName(specIndex));
-				end
-			end
-		end
-	end
-	
-	-- Refresh the talent frame to show the selected spec
-	if ( type(PlayerTalentFrame_Refresh) == "function" ) then
-		PlayerTalentFrame_Refresh();
-	end
-	
-	-- Update menu colors to reflect the new selection
-	if ( type(PlayerTalentFrameSpecDropdown_UpdateMenuColors) == "function" ) then
-		PlayerTalentFrameSpecDropdown_UpdateMenuColors();
-	end
-end
-
-function PlayerTalentFrameSpecDropdown_Update()
-	local dropdownButton = _G["PlayerTalentFrameSpecDropdown"];
-	if ( not dropdownButton ) then
-		return;
-	end
-	
-	-- Don't update if the menu is currently open (to prevent interference)
-	local menuFrame = dropdownButton.menuFrame;
-	if ( menuFrame and menuFrame:IsShown() ) then
-		return;
-	end
-	
-	if ( not PlayerTalentFrame or PlayerTalentFrame.inspect or PlayerTalentFrame.pet ) then
-		dropdownButton:Hide();
-		return;
-	end
-	
-	-- Show dropdown for both talents and glyphs
-	local selectedTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-	-- Note: Position is set later based on status frame/activate button
-	
-	-- Adjust dropdown width when viewing glyphs (reduce by half)
-	if ( selectedTab == GLYPH_TALENT_TAB ) then
-		dropdownButton:SetWidth(75); -- Half of 150
-	else
-		dropdownButton:SetWidth(150); -- Full width for talents
-	end
-	
-	local specMap = GetSpecMapTable();
-	if ( specMap and type(specMap.specs) == "table" and (specMap.specCount or 0) > 0 ) then
-		dropdownButton:Show();
-		
-		-- Initialize selectedSpecNumber if not set (prioritize activeSpecNumber from decoded message)
-		-- Only initialize if it's nil - don't override user's selection
-		-- Note: OnShow sets selectedSpecNumber to active spec, so this should rarely be nil
-		if ( selectedSpecNumber == nil ) then
-			if ( type(activeSpecNumber) == "number" and activeSpecNumber > 0 ) then
-				-- Use activeSpecNumber from decoded message if available
-				selectedSpecNumber = activeSpecNumber;
-				-- Also update talentGroup to match
-				if ( PlayerTalentFrame ) then
-					PlayerTalentFrame.talentGroup = activeSpecNumber;
-				end
-			else
-				-- Fallback to base game API
-				local activeTalentGroup = GetActiveTalentGroup(PlayerTalentFrame.inspect, PlayerTalentFrame.pet);
-				if ( activeTalentGroup and activeTalentGroup > 0 ) then
-					selectedSpecNumber = activeTalentGroup;
-					if ( PlayerTalentFrame ) then
-						PlayerTalentFrame.talentGroup = activeSpecNumber;
-					end
-				else
-					-- Fallback to current talentGroup or default to 1
-					selectedSpecNumber = PlayerTalentFrame.talentGroup or 1;
-					if ( PlayerTalentFrame ) then
-						PlayerTalentFrame.talentGroup = selectedSpecNumber;
-					end
-				end
-			end
-		end
-		
-		-- Update text to show current spec (use selectedSpecNumber, not activeSpecNumber)
-		if ( dropdownButton.text ) then
-			-- Always use selectedSpecNumber to show what the user is viewing, not what's active
-			local currentSpec = selectedSpecNumber or PlayerTalentFrame.talentGroup or 1;
-			dropdownButton.text:SetText(GetOrdinalSpecName(currentSpec));
-			
-			-- Set text color based on whether this spec is active
-			-- Use global activeSpecNumber directly (from decoded message) - this is the most reliable source
-			local isActiveSpec = false;
-			
-			-- Check activeSpecNumber first (from decoded message) - ensure we access the global variable
-			-- Use explicit global access to avoid any scope issues
-			local activeSpec = _G["activeSpecNumber"];
-			if ( type(activeSpec) == "number" and activeSpec > 0 and type(currentSpec) == "number" ) then
-				-- If activeSpecNumber is set from decoded message, use it exclusively
-				isActiveSpec = (currentSpec == activeSpec);
-			else
-				-- Only check base game API as fallback if activeSpecNumber is not set
-				local baseActiveTalentGroup = GetActiveTalentGroup(PlayerTalentFrame.inspect, PlayerTalentFrame.pet);
-				if ( baseActiveTalentGroup and baseActiveTalentGroup > 0 and type(currentSpec) == "number" ) then
-					isActiveSpec = (currentSpec == baseActiveTalentGroup);
-				end
-			end
-			
-			-- Set the text color based on whether the current spec is active
-			if ( isActiveSpec ) then
-				dropdownButton.text:SetTextColor(GREEN_FONT_COLOR.r, GREEN_FONT_COLOR.g, GREEN_FONT_COLOR.b, 1); -- Green for active spec
-			else
-				dropdownButton.text:SetTextColor(1.0, 0.82, 0, 1.0); -- Yellow for inactive specs
-			end
-		end
-		
-		-- Position dropdown based on whether viewing glyphs or talents
-		if ( selectedTab == GLYPH_TALENT_TAB ) then
-			-- When viewing glyphs: position at top left of frame, 2px above background texture, aligned with left edge
-			dropdownButton:ClearAllPoints();
-			dropdownButton:SetPoint("TOPLEFT", PlayerTalentFrame, "TOPLEFT", 19, -24); -- 2px above background texture, left aligned
-			
-			-- Ensure dropdown button is above glyph frame
-			if ( GlyphFrame and GlyphFrame:IsShown() ) then
-				local glyphFrameLevel = GlyphFrame:GetFrameLevel();
-				dropdownButton:SetFrameLevel(glyphFrameLevel + 1);
-				-- Menu frame is already set to FULLSCREEN_DIALOG with high frame level in ShowMenu
-			else
-				-- If glyph frame exists but isn't shown yet, use a high frame level
-				dropdownButton:SetFrameLevel(PlayerTalentFrame:GetFrameLevel() + 5);
-			end
-		else
-			-- Fallback: position at frame top right
-			dropdownButton:ClearAllPoints();
-			dropdownButton:SetPoint("TOPLEFT", PlayerTalentFrame, "TOPLEFT", 29, -24);
-		end
-	else
-		dropdownButton:Hide();
-	end
-end
 
 if ( not SpecMapBaseTalentWrappersInitialized ) then
 	SpecMapBaseTalentWrappersInitialized = true;
@@ -4062,3 +3864,41 @@ SpecMapTalentCache = {
 	ready = false,
 	freeTalents = nil,
 };
+
+if ( PlayerTalentFrameTalents ) then
+	PlayerTalentFrameTalents:Show();
+end
+if ( PlayerTalentFrameScrollFrame ) then
+	PlayerTalentFrameScrollFrame:Show();
+end
+
+local GLYPH_VIEW_TALENT_FRAME_WIDTH = nil;
+local GLYPH_VIEW_TALENT_FRAME_HEIGHT = nil;
+
+local resolvedSpecNumber = selectedSpecNumber;
+if ( type(resolvedSpecNumber) ~= "number" or resolvedSpecNumber <= 0 ) then
+	resolvedSpecNumber = SpecMap_GetActiveTalentGroup();
+	if ( type(resolvedSpecNumber) ~= "number" or resolvedSpecNumber <= 0 ) then
+		resolvedSpecNumber = GetActiveTalentGroup(false, false) or 1;
+	end
+	selectedSpecNumber = resolvedSpecNumber;
+end
+
+if ( not selectedSpec or not specs[selectedSpec] or specs[selectedSpec].pet ) then
+	local specKey = "spec" .. resolvedSpecNumber;
+	if ( specs[specKey] ) then
+		PlayerTalentFrame_SelectSpecByKey(specKey, true);
+	end
+end
+
+if ( type(resolvedSpecNumber) ~= "number" or resolvedSpecNumber <= 0 ) then
+	resolvedSpecNumber = 1;
+end
+
+if ( type(activeSpecNumber) ~= "number" or activeSpecNumber <= 0 ) then
+	local activeFromSpecMap = SpecMap_GetActiveTalentGroup();
+	if ( type(activeFromSpecMap) ~= "number" or activeFromSpecMap <= 0 ) then
+		activeFromSpecMap = GetActiveTalentGroup(false, false) or 1;
+	end
+	activeSpecNumber = activeFromSpecMap;
+end

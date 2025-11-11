@@ -52,6 +52,15 @@ GLYPH_SLOTS[4] = { left = 0.5234375, right = 0.65234375, top = 0.87109375, botto
 
 NUM_GLYPH_SLOTS = 6;
 
+local glyphPositions = {
+	[1] = {"CENTER", -1, 126},
+	[2] = {"CENTER", -1, -119},
+	[3] = {"TOPLEFT", 8, -62},
+	[4] = {"BOTTOMRIGHT", -10, 70},
+	[5] = {"TOPRIGHT", -8, -62},
+	[6] = {"BOTTOMLEFT", 7, 70},
+};
+
 local GLYPH_SOCKET_UNLOCK_LEVELS = {
 	[1] = 15,
 	[2] = 15,
@@ -60,6 +69,21 @@ local GLYPH_SOCKET_UNLOCK_LEVELS = {
 	[5] = 70,
 	[6] = 80,
 };
+
+local function GlyphFrame_PositionSockets(frame)
+	if ( not frame or not frame.background ) then
+		return;
+	end
+
+	for index, position in ipairs(glyphPositions) do
+		local glyphButton = _G[frame:GetName().."Glyph"..index];
+		if ( glyphButton ) then
+			glyphButton:ClearAllPoints();
+			local point, offsetX, offsetY = position[1], position[2], position[3];
+			glyphButton:SetPoint(point, frame.background, point, offsetX or 0, offsetY or 0);
+		end
+	end
+end
 
 local function GlyphFrame_GetSocketUnlockLevel(slotIndex, glyphType)
 	if ( type(SpecMap_GetGlyphSocketUnlockLevel) == "function" ) then
@@ -563,6 +587,7 @@ function GlyphFrame_OnShow (self)
 	PlayerTalentFrameControlBar:Hide();
 	PlayerTalentFrameControlBarResetButton:Hide();
 	PlayerTalentFrameControlBarLearnButton:Hide();
+	GlyphFrame_PositionSockets(self);
 	
 	GlyphFrame_Update();
 end
@@ -573,6 +598,7 @@ function GlyphFrame_OnLoad (self)
 	self.sparkleFrame = SparkleFrame:New(self);
 	-- Set scale to baseline (1.0) to match PlayerTalentFrame and ensure proper alignment
 	self:SetScale(1.0);
+	GlyphFrame_PositionSockets(self);
 	self:RegisterEvent("ADDON_LOADED");
 	self:RegisterEvent("GLYPH_ADDED");
 	self:RegisterEvent("GLYPH_REMOVED");
@@ -602,6 +628,7 @@ function GlyphFrame_OnEvent (self, event, ...)
 			local frameLevel = self:GetParent():GetFrameLevel() + 4;
 			self:SetFrameLevel(frameLevel);
 			PlayerTalentFrameCloseButton:SetFrameLevel(frameLevel + 1);
+			GlyphFrame_PositionSockets(self);
 		end
 	elseif ( event == "USE_GLYPH" or event == "PLAYER_LEVEL_UP" ) then
 		-- Rebuild glyph cache on level up (sockets unlock at different levels)

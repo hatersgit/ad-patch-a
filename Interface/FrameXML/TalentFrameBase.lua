@@ -434,12 +434,12 @@ function TalentFrame_Update(TalentFrame)
 					headerFrame.iconTexture = iconTexture;
 					
 					-- Create font string for title with smaller font size
-					local titleText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal");
+					local titleText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall");
 					titleText:SetPoint("LEFT", iconTexture, "RIGHT", 10, 0); -- 4px original + 6px = 10px
 					headerFrame.titleText = titleText;
 					
-					-- Create font string for points spent on the right side
-					local pointsText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge");
+					-- Create font string for points spent on the right side (smaller font)
+					local pointsText = headerFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal");
 					pointsText:SetPoint("RIGHT", headerFrame, "RIGHT", -8, 0); -- 8px inset from right edge
 					pointsText:SetTextColor(1, 1, 1, 1); -- White color
 					headerFrame.pointsText = pointsText;
