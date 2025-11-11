@@ -96,15 +96,6 @@ local function GlyphFrame_GetSocketUnlockLevel(slotIndex, glyphType)
 end
 
 
-local slotAnimations = {};
-local TOPLEFT, TOP, TOPRIGHT, BOTTOMRIGHT, BOTTOM, BOTTOMLEFT = 3, 1, 5, 4, 2, 6;
-slotAnimations[TOPLEFT] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = -85, ["yStart"] = 17, ["yStop"] = 60};
-slotAnimations[TOP] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = -13, ["yStart"] = 17, ["yStop"] = 100};
-slotAnimations[TOPRIGHT] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = 59, ["yStart"] = 17, ["yStop"] = 60};
-slotAnimations[BOTTOM] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = -13, ["yStart"] = 17, ["yStop"] = -64};
-slotAnimations[BOTTOMLEFT] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = -87, ["yStart"] = 18, ["yStop"] = -27};
-slotAnimations[BOTTOMRIGHT] = {["point"] = "CENTER", ["xStart"] = -13, ["xStop"] = 61, ["yStart"] = 18, ["yStop"] = -27};
-
 local HIGHLIGHT_BASEALPHA = .4;
 
 local function GlyphFrame_ShouldUseSpecMap()
@@ -276,15 +267,8 @@ function GlyphFrameGlyph_UpdateSlot (self)
 		end
 	end
 
-	local slotAnimation = slotAnimations[id];
-	
 	if ( not enabled ) then
 		-- Socket is locked - show locked texture
-		slotAnimation.glyph = nil;
-		if ( slotAnimation.sparkle ) then
-			slotAnimation.sparkle:StopAnimating();
-			slotAnimation.sparkle:Hide();
-		end
 		self.shine:Hide();
 		self.background:Hide();
 		self.glyph:Hide();
@@ -294,15 +278,9 @@ function GlyphFrameGlyph_UpdateSlot (self)
 		-- Tooltip logic is kept in OnEnter handler
 	else
 		-- Socket is unlocked
-		slotAnimation.glyph = nil; -- No animations
-		if ( slotAnimation.sparkle ) then
-			slotAnimation.sparkle:StopAnimating();
-			slotAnimation.sparkle:Hide();
-		end
 		self.spell = glyphSpell; -- Store for tooltip
 		
 		if ( hasGlyph ) then
-			slotAnimation.glyph = true;
 			-- Glyph is slotted - show both ring and setting
 			self.shine:Show();
 			self.ring:Show();
@@ -563,18 +541,7 @@ function GlyphFrameGlyph_OnLeave (self)
 	GameTooltip:Hide();
 end
 
-local GLYPH_SPARKLE_SIZES = 3;
-local GLYPH_DURATION_MODIFIERS = { 1.25, 1.5, 1.8 };
-
 function GlyphFrame_OnUpdate (self, elapsed)
-	-- Disabled sparkle animations to improve FPS
-	-- for i = 1, #slotAnimations do
-	-- 	local animation = slotAnimations[i];
-	-- 	if ( animation.glyph and not (animation.sparkle and animation.sparkle.animGroup:IsPlaying()) ) then
-	-- 		local sparkleSize = math.random(GLYPH_SPARKLE_SIZES);
-	-- 		GlyphFrame_StartSlotAnimation(i, sparkleSize * GLYPH_DURATION_MODIFIERS[sparkleSize], sparkleSize);
-	-- 	end
-	-- end
 end
 
 function GlyphFrame_PulseGlow ()
@@ -595,7 +562,6 @@ end
 function GlyphFrame_OnLoad (self)
 	local name = self:GetName();
 	self.background = _G[name .. "Background"];
-	self.sparkleFrame = SparkleFrame:New(self);
 	-- Set scale to baseline (1.0) to match PlayerTalentFrame and ensure proper alignment
 	self:SetScale(1.0);
 	GlyphFrame_PositionSockets(self);
@@ -652,7 +618,6 @@ function GlyphFrame_OnEvent (self, event, ...)
 					PlaySound("Glyph_MajorCreate");
 				end
 			elseif ( event == "GLYPH_REMOVED" ) then
-				GlyphFrame_StopSlotAnimation(index);
 				if ( glyphType == GLYPHTYPE_MINOR ) then
 					PlaySound("Glyph_MinorDestroy");
 				elseif ( glyphType == GLYPHTYPE_MAJOR ) then
@@ -694,15 +659,6 @@ function GlyphFrame_Update ()
 		GlyphFrameGlyph_UpdateSlot(_G["GlyphFrameGlyph"..i]);
 	end
 	
-	-- Stop any running sparkle animations to improve FPS
-	for i = 1, NUM_GLYPH_SLOTS do
-		local animation = slotAnimations[i];
-		if ( animation and animation.sparkle ) then
-			animation.sparkle.animGroup:Stop();
-			animation.sparkle:Hide();
-		end
-	end
-	
 	-- Hide glow to improve FPS
 	if ( GlyphFrame and GlyphFrame.glow ) then
 		GlyphFrame.glow:Hide();
@@ -722,48 +678,5 @@ function GlyphFrame_Update ()
 		if ( type(PlayerTalentFrame_UpdateControls) == "function" ) then
 			PlayerTalentFrame_UpdateControls(activeTalentGroup, numTalentGroups);
 		end
-	end
-end
-
-function GlyphFrame_StartSlotAnimation (slotID, duration, size)
-	local animation = slotAnimations[slotID];
-
-	-- init texture to animate
-	local sparkleName = "GlyphFrameSparkle"..slotID;
-	local sparkle = _G[sparkleName];
-	if ( not sparkle ) then
-		sparkle = GlyphFrame:CreateTexture(sparkleName, "OVERLAY", "GlyphSparkleTexture");
-		sparkle.slotID = slotID;
-	end
-	local template;
-	if ( size == 1 ) then
-		template = "SparkleTextureSmall";
-	elseif ( size == 2 ) then
-		template = "SparkleTextureKindaSmall";
-	else
-		template = "SparkleTextureNormal";
-	end
-	local sparkleDim = SparkleDimensions[template];
-	sparkle:SetHeight(sparkleDim.height);
-	sparkle:SetWidth(sparkleDim.width);
-	sparkle:SetPoint("CENTER", GlyphFrame, animation.point, animation.xStart, animation.yStart);
-	sparkle:Show();
-
-	-- init animation
-	local offsetX, offsetY = animation.xStop - animation.xStart, animation.yStop - animation.yStart;
-	local animGroupAnim = sparkle.animGroup.translate;
-	animGroupAnim:SetOffset(offsetX, offsetY);
-	animGroupAnim:SetDuration(duration);
-	animGroupAnim:Play();
-
-	animation.sparkle = sparkle;
-end
-
-function GlyphFrame_StopSlotAnimation (slotID)
-	local animation = slotAnimations[slotID];
-	if ( animation.sparkle ) then
-		animation.sparkle.animGroup:Stop();
-		animation.sparkle:Hide();
-		animation.sparkle = nil;
 	end
 end

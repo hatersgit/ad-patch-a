@@ -29,8 +29,12 @@
 			</OnLeave>
 		</Scripts>
 		<NormalTexture/>
-		<HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD"/>
-		<CheckedTexture file="Interface\Buttons\CheckButtonHilight" alphaMode="ADD"/>
+		<HighlightTexture file="Interface\Buttons\WHITE8X8" alphaMode="ADD">
+			<Color r="1" g="1" b="1" a="0.35"/>
+		</HighlightTexture>
+		<CheckedTexture file="Interface\Buttons\WHITE8X8" alphaMode="ADD">
+			<Color r="1" g="1" b="1" a="0.5"/>
+		</CheckedTexture>
 	</CheckButton>
 	<Button name="PlayerTalentTabTemplate" inherits="CharacterFrameTabButtonTemplate" virtual="true">
 		<Scripts>
@@ -413,17 +417,6 @@
 						<Offset x="0" y="81"/>
 					</Anchor>
 				</Anchors>
-				<Layers>
-					<Layer level="BORDER">
-						<Texture name="$parentButtonBorder" file="Interface\Buttons\UI-Button-Borders2">
-							<Size x="164" y="26"/>
-							<Anchors>
-								<Anchor point="RIGHT"/>
-							</Anchors>
-							<TexCoords left="0.16015625" right="0.470703125" top="0.0" bottom="0.203125"/>
-						</Texture>
-					</Layer>
-				</Layers>
 				<Frames>
 					<Button name="PlayerTalentFrameResetButton" inherits="UIPanelButtonTemplate" text="RESET">
 						<Size x="80" y="22"/>
@@ -449,44 +442,6 @@
 							<OnClick function="PlayerTalentFrameLearnButton_OnClick"/>
 						</Scripts>
 					</Button>
-					<Frame name="PlayerTalentFramePreviewBarFiller">
-						<Size x="296" y="26"/>
-						<Anchors>
-							<Anchor point="LEFT"/>
-							<Anchor point="RIGHT" relativeTo="$parentButtonBorder" relativePoint="LEFT">
-								<Offset x="0" y="0"/>
-							</Anchor>
-						</Anchors>
-						<Layers>
-							<Layer level="BACKGROUND">
-								<Texture name="$parentButtonBackgroundLeft" file="Interface\Buttons\UI-Button-Borders2">
-									<Size x="8" y="26"/>
-									<Anchors>
-										<Anchor point="LEFT"/>
-										<Anchor point="TOP"/>
-										<Anchor point="BOTTOM"/>
-									</Anchors>
-									<TexCoords left="0.470703125" right="0.484375" top="0.0" bottom="0.203125"/>
-								</Texture>
-								<Texture name="$parentButtonBackgroundRight" file="Interface\Buttons\UI-Button-Borders2">
-									<Size x="8" y="26"/>
-									<Anchors>
-										<Anchor point="RIGHT"/>
-										<Anchor point="TOP"/>
-										<Anchor point="BOTTOM"/>
-									</Anchors>
-									<TexCoords left="0.78515625" right="0.80078125" top="0.0" bottom="0.203125"/>
-								</Texture>
-								<Texture name="$parentButtonBackgroundMiddle" file="Interface\Buttons\UI-Button-Borders2">
-									<Anchors>
-										<Anchor point="TOPLEFT" relativeTo="$parentButtonBackgroundLeft" relativePoint="TOPRIGHT"/>
-										<Anchor point="BOTTOMRIGHT" relativeTo="$parentButtonBackgroundRight" relativePoint="BOTTOMLEFT"/>
-									</Anchors>
-									<TexCoords left="0.484375" right="0.78515625" top="0.0" bottom="0.203125"/>
-								</Texture>
-							</Layer>
-						</Layers>
-					</Frame>
 				</Frames>
 			</Frame>
 
@@ -837,7 +792,7 @@
 				<Anchors>
 					<Anchor point="TOPLEFT" relativePoint="TOPRIGHT">
 						<Offset>
-							<AbsDimension x="-32" y="-65"/>
+							<AbsDimension x="-32" y="0"/>
 						</Offset>
 					</Anchor>
 				</Anchors>

@@ -6,7 +6,7 @@ MAX_NUM_TALENTS = 40;
 PLAYER_TALENTS_PER_TIER = 5;
 PET_TALENTS_PER_TIER = 3;
 
-DEFAULT_TALENT_SPEC = "spec1";
+DEFAULT_TALENT_SPEC = 1;
 DEFAULT_TALENT_TAB = 1;
 
 TALENT_BUTTON_SIZE = 32;
@@ -260,15 +260,19 @@ function TalentFrame_Update(TalentFrame)
 		local backgroundPiece = _G[talentFrameName.."BackgroundTopLeft"];
 		backgroundPiece:SetTexture(base.."TopLeft");
 		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece:Show();
 		backgroundPiece = _G[talentFrameName.."BackgroundTopRight"];
 		backgroundPiece:SetTexture(base.."TopRight");
 		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece:Show();
 		backgroundPiece = _G[talentFrameName.."BackgroundBottomLeft"];
 		backgroundPiece:SetTexture(base.."BottomLeft");
 		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece:Show();
 		backgroundPiece = _G[talentFrameName.."BackgroundBottomRight"];
 		backgroundPiece:SetTexture(base.."BottomRight");
 		SetDesaturation(backgroundPiece, not isActiveTalentGroup);
+		backgroundPiece:Show();
 	end
 
 	-- get unspent talent points

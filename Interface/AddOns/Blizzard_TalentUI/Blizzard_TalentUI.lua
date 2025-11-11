@@ -407,6 +407,20 @@ local function PlayerTalentFrame_UpdateSpecTabChecks()
 	end
 end
 
+local function TalentFrame_GetInspectFlag()
+	if ( PlayerTalentFrame and PlayerTalentFrame.inspect ) then
+		return 1;
+	end
+	return nil;
+end
+
+local function TalentFrame_GetPetFlag()
+	if ( PlayerTalentFrame and PlayerTalentFrame.pet ) then
+		return 1;
+	end
+	return nil;
+end
+
 local function PlayerTalentFrame_SelectSpecByKey(specKey, suppressRefresh)
 	if ( not PlayerTalentFrame ) then
 		return;
@@ -422,13 +436,13 @@ local function PlayerTalentFrame_SelectSpecByKey(specKey, suppressRefresh)
 	selectedSpec = specKey;
 
 	if ( spec.pet ) then
-		PlayerTalentFrame.pet = true;
-		PlayerTalentFrame.inspect = false;
+		PlayerTalentFrame.pet = 1;
+		PlayerTalentFrame.inspect = nil;
 		PlayerTalentFrame.unit = spec.unit or "pet";
 		PlayerTalentFrame.talentGroup = spec.talentGroup;
 	else
-		PlayerTalentFrame.pet = false;
-		PlayerTalentFrame.inspect = false;
+		PlayerTalentFrame.pet = nil;
+		PlayerTalentFrame.inspect = nil;
 		PlayerTalentFrame.unit = spec.unit or "player";
 		PlayerTalentFrame.talentGroup = spec.talentGroup;
 		selectedSpecNumber = spec.talentGroup;
@@ -2204,7 +2218,7 @@ function PlayerTalentFrame_OnShow(self)
 		-- For pet/inspect, use the old spec tab system
 		if ( not selectedSpec ) then
 			-- if no spec was selected, try to select the active one
-			PlayerSpecTab_OnClick(activeSpec and specTabs[activeSpec] or specTabs[DEFAULT_TALENT_SPEC]);
+			PlayerSpecTab_OnClick(specTabs[activeSpec]);
 		else
 			PlayerTalentFrame_Refresh();
 		end
@@ -2418,7 +2432,6 @@ end
 
 function PlayerTalentFrame_UpdateActiveSpec(activeTalentGroup, numTalentGroups)
 	-- set the active spec
-	activeSpec = DEFAULT_TALENT_SPEC;
 	for index, spec in next, specs do
 		if ( not spec.pet and spec.talentGroup == activeTalentGroup ) then
 			activeSpec = index;
@@ -2579,15 +2592,15 @@ function PlayerTalentFrameTalent_OnEnter(self)
 				GameTooltip:SetHyperlink(talentLink);
 			else
 				-- Rank is 0 or no name, use normal SetTalent
-				GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, false);
+				GameTooltip:SetTalent(tabIndex, talentIndex, TalentFrame_GetInspectFlag(), TalentFrame_GetPetFlag(), baseTalentGroup, false);
 			end
 		else
 			-- Fallback to normal SetTalent
-			GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, false);
+			GameTooltip:SetTalent(tabIndex, talentIndex, TalentFrame_GetInspectFlag(), TalentFrame_GetPetFlag(), baseTalentGroup, false);
 		end
 	else
 		-- For pet/inspect, use normal SetTalent
-		GameTooltip:SetTalent(tabIndex, talentIndex, PlayerTalentFrame.inspect, PlayerTalentFrame.pet, baseTalentGroup, GetCVarBool("previewTalents"));
+		GameTooltip:SetTalent(tabIndex, talentIndex, TalentFrame_GetInspectFlag(), TalentFrame_GetPetFlag(), baseTalentGroup, GetCVarBool("previewTalents"));
 	end
 end
 
@@ -2820,15 +2833,6 @@ function PlayerTalentFrameActivateButton_OnEvent(self, event, ...)
 end
 
 function PlayerTalentFrameActivateButton_Update()
-	-- local spec = selectedSpec and specs[selectedSpec];
-	-- if ( spec and PlayerTalentFrameActivateButton:IsShown() ) then
-	-- 	-- if the activation spell is being cast currently, disable the activate button
-	-- 	if ( IsCurrentSpell(TALENT_ACTIVATION_SPELLS[spec.talentGroup]) ) then
-	-- 		PlayerTalentFrameActivateButton:Disable();
-	-- 	else
-	-- 		PlayerTalentFrameActivateButton:Enable();
-	-- 	end
-	-- end
 end
 
 -- PlayerTalentFrameResetButton_OnEnter and PlayerTalentFrameResetButton_OnLeave removed
@@ -3190,20 +3194,17 @@ function PlayerTalentFrame_UpdateSpecs(activeTalentGroup, numTalentGroups, activ
 	local orderedTabs = PlayerTalentFrame_GetOrderedSpecTabs();
 	local firstShownTab, lastShownTab;
 
-	for _, frame in ipairs(orderedTabs) do
+	for index, frame in ipairs(orderedTabs) do
 		local specKey = frame.specIndex;
 		local spec = specs[specKey];
 		if ( PlayerSpecTab_Update(frame, activeTalentGroup, numTalentGroups, activePetTalentGroup, numPetTalentGroups) ) then
 			firstShownTab = firstShownTab or frame;
 			frame:ClearAllPoints();
 
-			local offsetX = (specKey == selectedSpec) and SELECTEDSPEC_OFFSETX or 0;
 			if ( not lastShownTab ) then
-				frame:SetPoint("TOPLEFT", frame:GetParent(), "TOPRIGHT", -32 + offsetX, -65);
+				frame:SetPoint("TOPLEFT", frame:GetParent(), "TOPRIGHT", -32, -33);
 			else
-				local previousSpec = specs[lastShownTab.specIndex];
-				local verticalSpacing = -6;
-				frame:SetPoint("TOPLEFT", lastShownTab, "BOTTOMLEFT", offsetX, verticalSpacing);
+				frame:SetPoint("TOPLEFT", lastShownTab, "BOTTOMLEFT", 0, -6);
 			end
 			lastShownTab = frame;
 		else
@@ -3302,6 +3303,7 @@ function PlayerSpecTab_Update(self, ...)
 	else
 		isActiveSpec = spec.talentGroup == activeTalentGroup;
 	end
+	local showActiveBorder = isActiveSpec and not spec.pet;
 	local normalTexture = self:GetNormalTexture();
 
 	-- set the background based on whether or not we're selected
@@ -3324,18 +3326,20 @@ function PlayerSpecTab_Update(self, ...)
 
 	-- set the selection visuals
 	local checkedTexture = self:GetCheckedTexture();
-	if ( SELECTEDSPEC_DISPLAYTYPE == "PUSHED_OUT_CHECKED" ) then
-		if ( isSelectedSpec and checkedTexture ) then
+	if ( checkedTexture ) then
+		if ( isSelectedSpec ) then
 			checkedTexture:Show();
-		elseif ( checkedTexture ) then
+		else
 			checkedTexture:Hide();
 		end
-	elseif ( checkedTexture ) then
-		checkedTexture:Hide();
 	end
 
 	if ( self.backdropFrame ) then
-		self.backdropFrame:SetBackdropBorderColor(0, 0, 0, 1);
+		if ( showActiveBorder ) then
+			self.backdropFrame:SetBackdropBorderColor(1, 0.82, 0, 1);
+		else
+			self.backdropFrame:SetBackdropBorderColor(0, 0, 0, 1);
+		end
 		self.backdropFrame:SetBackdropColor(0, 0, 0, 1);
 	end
 
@@ -3469,7 +3473,10 @@ function PlayerSpecTab_Load(self, specIndex)
 		checkedTexture:SetPoint("CENTER", self, "CENTER", 0, 0);
 	elseif ( SELECTEDSPEC_DISPLAYTYPE == "GOLD_INSIDE" ) then
 		local checkedTexture = self:GetCheckedTexture();
-		checkedTexture:SetTexture("Interface\\Buttons\\CheckButtonHilight");
+		checkedTexture:SetTexture("Interface\\Buttons\\WHITE8X8");
+		checkedTexture:SetVertexColor(1, 1, 1, 0.35);
+		checkedTexture:ClearAllPoints();
+		checkedTexture:SetAllPoints(self);
 	end
 
 	local normalTexture = self:GetNormalTexture();
@@ -3494,6 +3501,7 @@ function PlayerSpecTab_OnClick(self)
 		return;
 	end
 
+	self:SetChecked(true);
 	PlayerTalentFrame_SelectSpecByKey(self.specIndex);
 end
 
