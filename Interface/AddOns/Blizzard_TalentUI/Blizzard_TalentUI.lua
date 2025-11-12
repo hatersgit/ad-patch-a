@@ -3217,7 +3217,9 @@ function PlayerTalentFrame_UpdateSpecs(activeTalentGroup, numTalentGroups, activ
 
 	if ( not selectedSpec ) then
 		local handled = false;
-		if ( pendingActiveSpecSelection ) then
+		local specMapReady = SpecMap_TalentCacheIsReady and SpecMap_TalentCacheIsReady() or false;
+
+		if ( specMapReady and pendingActiveSpecSelection ) then
 			local pendingKey = "spec" .. pendingActiveSpecSelection;
 			local pendingFrame = specTabs[pendingKey];
 			if ( pendingFrame and pendingFrame:IsShown() and specs[pendingKey] ) then
@@ -3225,20 +3227,13 @@ function PlayerTalentFrame_UpdateSpecs(activeTalentGroup, numTalentGroups, activ
 				pendingActiveSpecSelection = nil;
 				handled = true;
 			else
-				if ( SpecMap_TalentCacheIsReady and SpecMap_TalentCacheIsReady() ) then
-					pendingActiveSpecSelection = nil;
-				end
+				pendingActiveSpecSelection = nil;
 			end
 		end
-		if ( not handled ) then
+
+		if ( not handled and specMapReady ) then
 			local activeSpecCandidate = SpecMap_GetActiveTalentGroup();
-			if ( type(activeSpecCandidate) ~= "number" or activeSpecCandidate <= 0 ) then
-				activeSpecCandidate = GetActiveTalentGroup(false, false);
-				if ( not activeSpecCandidate or activeSpecCandidate <= 0 ) then
-					activeSpecCandidate = nil;
-				end
-			end
-			if ( activeSpecCandidate ) then
+			if ( type(activeSpecCandidate) == "number" and activeSpecCandidate > 0 ) then
 				local activeKey = "spec" .. activeSpecCandidate;
 				local activeFrame = specTabs[activeKey];
 				if ( activeFrame and activeFrame:IsShown() and specs[activeKey] ) then
@@ -3247,6 +3242,7 @@ function PlayerTalentFrame_UpdateSpecs(activeTalentGroup, numTalentGroups, activ
 				end
 			end
 		end
+
 		if ( not handled and firstShownTab ) then
 			PlayerTalentFrame_SelectSpecByKey(firstShownTab.specIndex, true);
 		end
@@ -3425,7 +3421,9 @@ function PlayerSpecTab_Load(self, specIndex)
 	specTabs[specIndex] = self;
 	numSpecTabs = numSpecTabs + 1;
 
-	EnsureTalentSpecCacheEntry(specIndex);
+	if ( not talentSpecInfoCache[specIndex] ) then
+		talentSpecInfoCache[specIndex] = {};
+	end
 
 	local numericIndex = string.match(specIndex or "", "^spec(%d+)$");
 	if ( numericIndex ) then
@@ -3454,25 +3452,22 @@ function PlayerSpecTab_Load(self, specIndex)
 		self.backdropFrame = backdrop;
 	end
 
-	-- set the spec's portrait
 	local spec = specs[self.specIndex];
-	if ( spec.portraitUnit ) then
+	if ( spec and spec.portraitUnit ) then
 		SetPortraitTexture(self:GetNormalTexture(), spec.portraitUnit);
 		self.usingPortraitTexture = true;
 	else
 		self.usingPortraitTexture = false;
 	end
 
-	-- set the checked texture
+	local checkedTexture = self:GetCheckedTexture();
 	if ( SELECTEDSPEC_DISPLAYTYPE == "BLUE" ) then
-		local checkedTexture = self:GetCheckedTexture();
 		checkedTexture:SetTexture("Interface\\Buttons\\UI-Button-Outline");
 		checkedTexture:SetWidth(64);
 		checkedTexture:SetHeight(64);
 		checkedTexture:ClearAllPoints();
 		checkedTexture:SetPoint("CENTER", self, "CENTER", 0, 0);
 	elseif ( SELECTEDSPEC_DISPLAYTYPE == "GOLD_INSIDE" ) then
-		local checkedTexture = self:GetCheckedTexture();
 		checkedTexture:SetTexture("Interface\\Buttons\\WHITE8X8");
 		checkedTexture:SetVertexColor(1, 1, 1, 0.35);
 		checkedTexture:ClearAllPoints();
