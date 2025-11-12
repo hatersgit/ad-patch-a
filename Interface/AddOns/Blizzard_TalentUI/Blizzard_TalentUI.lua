@@ -3391,9 +3391,23 @@ function PlayerSpecTab_Update(self, ...)
 	if ( hasMultipleTalentGroups ) then
 		local specInfoCache = talentSpecInfoCache[specKey];
 		local primaryTabIndex = specInfoCache.primaryTabIndex;
-		if ( primaryTabIndex > 0 ) then
+		if ( primaryTabIndex > 0 and specInfoCache[primaryTabIndex] ) then
+			local iconPath = specInfoCache[primaryTabIndex].icon;
 			-- the spec had a primary tab, set the icon to that tab's icon
-			normalTexture:SetTexture(specInfoCache[primaryTabIndex].icon);
+			if ( iconPath and iconPath ~= "" ) then
+				normalTexture:SetTexture(iconPath);
+				normalTexture:Show();
+			else
+				-- Icon path is missing, fall through to default/hybrid logic
+				if ( specInfoCache.numTabs > 1 and specInfoCache.totalPointsSpent > 0 ) then
+					normalTexture:SetTexture(TALENT_HYBRID_ICON);
+				elseif ( spec.defaultSpecTexture ) then
+					normalTexture:SetTexture(spec.defaultSpecTexture);
+				elseif ( spec.portraitUnit ) then
+					SetPortraitTexture(normalTexture, spec.portraitUnit);
+					self.usingPortraitTexture = true;
+				end
+			end
 		else
 			if ( specInfoCache.numTabs > 1 and specInfoCache.totalPointsSpent > 0 ) then
 				-- the spec is only considered a hybrid if the spec had more than one tab and at least

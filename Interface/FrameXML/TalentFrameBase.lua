@@ -1820,8 +1820,20 @@ function TalentFrame_UpdateSpecInfoCache(cache, inspect, pet, talentGroup)
 		cache[i] = cache[i] or { };
 		if ( i <= numTabs ) then
 			local name, icon, pointsSpent, background, previewPointsSpent = GetTalentTabInfo(i, inspect, pet, talentGroup);
-			if ( not inspect and not pet and type(SpecMap_TalentCacheApplyTabPoints) == "function" ) then
-				pointsSpent, previewPointsSpent = SpecMap_TalentCacheApplyTabPoints(talentGroup, i, pointsSpent, previewPointsSpent);
+			
+			-- For player talents, use SpecMap cache if available to get accurate point counts
+			-- This ensures the spec tab icon reflects the actual points spent
+			if ( not inspect and not pet and type(SpecMap_TalentCacheSumTabPoints) == "function" ) then
+				local cachePoints = SpecMap_TalentCacheSumTabPoints(talentGroup, i);
+				if ( cachePoints ~= nil ) then
+					pointsSpent = cachePoints;
+					previewPointsSpent = 0; -- Preview points are handled separately in SpecMap cache
+				else
+					-- Fallback to applying cache points if sum function doesn't work
+					if ( type(SpecMap_TalentCacheApplyTabPoints) == "function" ) then
+						pointsSpent, previewPointsSpent = SpecMap_TalentCacheApplyTabPoints(talentGroup, i, pointsSpent, previewPointsSpent);
+					end
+				end
 			end
 
 			local displayPointsSpent = pointsSpent + previewPointsSpent;
@@ -1835,7 +1847,9 @@ function TalentFrame_UpdateSpecInfoCache(cache, inspect, pet, talentGroup)
 			cache.totalPointsSpent = cache.totalPointsSpent + displayPointsSpent;
 
 			-- update the high and low points spent info
-			if ( displayPointsSpent > highPointsSpent ) then
+			-- Use >= instead of > to ensure we always have a primary tab when points are spent
+			-- This ensures the spec tab icon updates based on the tab with the most points
+			if ( displayPointsSpent >= highPointsSpent ) then
 				highPointsSpent = displayPointsSpent;
 				highPointsSpentIndex = i;
 			end
@@ -1864,13 +1878,24 @@ function TalentFrame_UpdateSpecInfoCache(cache, inspect, pet, talentGroup)
 		end
 	end
 
-	if ( highPointsSpentIndex and lowPointsSpentIndex ) then
-		-- now that our points spent buffer is filled, we can compute the mid points spent
-		local midPointsSpentIndex = rshift(numTabs, 1) + 1;
-		local midPointsSpent = sortedTabPointsSpentBuf[midPointsSpentIndex];
-		-- now let's use our crazy formula to determine which tab is the primary one
-		if ( 3*(midPointsSpent-lowPointsSpent) < 2*(highPointsSpent-lowPointsSpent) ) then
-			cache.primaryTabIndex = highPointsSpentIndex;
+	-- Always set primaryTabIndex to the tab with the most points if any points are spent
+	-- This ensures the spec tab icon reflects the talent tree with the most investment
+	-- If there's a tie, use the last tab encountered with the highest points
+	if ( highPointsSpentIndex and highPointsSpent > 0 ) then
+		cache.primaryTabIndex = highPointsSpentIndex;
+	else
+		-- No points spent or no valid tab found, ensure primaryTabIndex is 0
+		cache.primaryTabIndex = 0;
+	end
+	
+	-- Debug: Ensure we have valid icon data for the primary tab
+	if ( cache.primaryTabIndex > 0 and cache[cache.primaryTabIndex] ) then
+		-- Verify the icon exists, if not try to get it from GetTalentTabInfo
+		if ( not cache[cache.primaryTabIndex].icon or cache[cache.primaryTabIndex].icon == "" ) then
+			local name, icon = GetTalentTabInfo(cache.primaryTabIndex, inspect, pet, talentGroup);
+			if ( icon and icon ~= "" ) then
+				cache[cache.primaryTabIndex].icon = icon;
+			end
 		end
 	end
 end
