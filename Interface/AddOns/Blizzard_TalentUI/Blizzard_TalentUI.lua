@@ -3330,12 +3330,21 @@ function PlayerSpecTab_Update(self, ...)
 		end
 	end
 
-	if ( self.backdropFrame ) then
-		if ( showActiveBorder ) then
-			self.backdropFrame:SetBackdropBorderColor(1, 0.82, 0, 1);
-		else
-			self.backdropFrame:SetBackdropBorderColor(0, 0, 0, 1);
+	-- show/hide active overlay
+	if ( self.activeOverlay ) then
+		if ( normalTexture ) then
+			self.activeOverlay:ClearAllPoints();
+			self.activeOverlay:SetAllPoints(normalTexture);
 		end
+		if ( showActiveBorder ) then
+			self.activeOverlay:Show();
+		else
+			self.activeOverlay:Hide();
+		end
+	end
+
+	if ( self.backdropFrame ) then
+		self.backdropFrame:SetBackdropBorderColor(0, 0, 0, 1);
 		self.backdropFrame:SetBackdropColor(0, 0, 0, 1);
 	end
 
@@ -3458,6 +3467,21 @@ function PlayerSpecTab_Load(self, specIndex)
 		self.usingPortraitTexture = true;
 	else
 		self.usingPortraitTexture = false;
+	end
+
+	if ( not self.activeOverlay ) then
+		local overlay = self:CreateTexture(nil, "OVERLAY");
+		local normalTex = self:GetNormalTexture();
+		if ( normalTex ) then
+			overlay:SetAllPoints(normalTex);
+		else
+			overlay:SetAllPoints(self);
+		end
+		overlay:SetTexture("Interface\\Buttons\\WHITE8X8");
+		overlay:SetVertexColor(1, 0.82, 0, 0.3);
+		overlay:SetBlendMode("MOD");
+		overlay:Hide();
+		self.activeOverlay = overlay;
 	end
 
 	local checkedTexture = self:GetCheckedTexture();
