@@ -1,6 +1,15 @@
 local SpecMapTalentCache;
 local SpecMap_TalentCacheEnsureReady;
 
+-- Talent System Opcodes
+-- These constants define the opcodes used for server communication
+SPEC_INFO_OP = 7;
+SPEC_UPDATE_ACTIVE_OP = 8;
+LEARN_SPELLS_OP = 9;
+RESET_TALENTS_OP = 10;
+BATTLEPASS_INFO_OP = 11;
+BATTLEPASS_REWARD_OP = 12;
+
 function ResolveBaseTalentGroup(talentGroup)
 	if ( type(SpecMap_ResolveTalentGroupForBaseAPI) == "function" ) then
 		return SpecMap_ResolveTalentGroupForBaseAPI(talentGroup);
@@ -140,9 +149,8 @@ StaticPopupDialogs["CONFIRM_LEARN_PREVIEW_TALENTS"] = {
 			-- Send message to server
 			-- Format: OPCODE|encodedTalents
 			-- Example: 8|LEARN|1|0:123:2,0:456:3,1:789:1
-			local learnOpCode = 9; -- Learn talents opcode (adjust if needed)
-			local fullMessage = string.format("%d|%s", learnOpCode, encodedMessage);
-			PushMessageToServer(fullMessage);
+			local fullMessage = string.format("%d|%s", LEARN_SPELLS_OP, encodedMessage);
+			RequestServerAction(fullMessage);
 		end
 	end,
 	OnCancel = function (self)
@@ -2096,9 +2104,7 @@ function PlayerTalentFrame_OnLoad(self)
 				local previousFrameGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or nil;
 				local previousTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
 				-- Send message to server with opcode 10
-				local resetOpCode = 10;
-				local fullMessage = string.format("%d|", resetOpCode);
-				PushMessageToServer(fullMessage);
+				RequestServerAction(RESET_TALENTS_OP);
 				if ( previousSpecKey ) then
 					selectedSpec = previousSpecKey;
 				end
@@ -2813,9 +2819,8 @@ function PlayerTalentFrameActivateButton_OnClick(self)
 	if ( specNumber ~= nil ) then
 		-- Send message to server with opcode 8
 		-- Example: 8|0
-		local activateOpCode = 8;
-		local fullMessage = string.format("%d|%d", activateOpCode, specNumber);
-		PushMessageToServer(fullMessage);
+		local fullMessage = string.format("%d|%d", SPEC_UPDATE_ACTIVE_OP, specNumber);
+		RequestServerAction(fullMessage);
 	end
 end
 
@@ -3620,7 +3625,7 @@ end
 -- Where each spec is: talentCount:talentId,tabId,rank;talentId,tabId,rank;...|glyph0,glyph1,glyph2,...
 
 -- Constants
-local SPEC_INFO_OP = 7
+-- Note: SPEC_INFO_OP is now defined globally at the top of the file
 
 -- Main decode function
 local function DecodeSpecInfo(message)
@@ -3826,8 +3831,9 @@ end
     end
 ]]
 
-MESSAGE_PREFIX = "HATEROP"
-
+MESSAGE_PREFIX_SERVER = "AC_CU_SERVER_MSG"
+MESSAGE_PREFIX_GET = "AC_CU_GET"
+MESSAGE_PREFIX_POST = "AC_CU_POST"
 SpecMap = {}
 
 --- Listen for Spec Info message
@@ -3835,13 +3841,9 @@ local fs = CreateFrame("Frame")
 fs:RegisterEvent("CHAT_MSG_ADDON")
 fs:SetScript("OnEvent", function(self, event, ...)
     local prefix, msg, msgType, sender = ...
-	if event ~= "CHAT_MSG_ADDON" or prefix ~= MESSAGE_PREFIX or msgType ~= "WHISPER" then
+	if event ~= "CHAT_MSG_ADDON" or prefix ~= MESSAGE_PREFIX_SERVER or msgType ~= "WHISPER" then
         return
     end
-
-	if msg == "7|GET" then
-		return
-	end
 
 	local decoded = DecodeSpecInfo(msg)
 	if ( decoded ) then
@@ -3850,11 +3852,15 @@ fs:SetScript("OnEvent", function(self, event, ...)
 	end
 end)
 
-function PushMessageToServer(Msg)
-	SendAddonMessage(MESSAGE_PREFIX, Msg, "WHISPER", UnitName("player"))
+function PushQueryServer(Msg)
+	SendAddonMessage(MESSAGE_PREFIX_GET, Msg, "WHISPER", UnitName("player"))
 end
 
-PushMessageToServer("7|GET")
+function RequestServerAction(Msg)
+	SendAddonMessage(MESSAGE_PREFIX_POST, Msg, "WHISPER", UnitName("player"))
+end
+
+PushQueryServer("7")
 
 if ( not SpecMapBaseTalentWrappersInitialized ) then
 	SpecMapBaseTalentWrappersInitialized = true;
