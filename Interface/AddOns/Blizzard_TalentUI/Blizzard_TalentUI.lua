@@ -160,6 +160,73 @@ StaticPopupDialogs["CONFIRM_LEARN_PREVIEW_TALENTS"] = {
 	exclusive = 1,
 }
 
+StaticPopupDialogs["CONFIRM_RESET_TALENTS"] = {
+	text = "Do you want to unlearn all of your talents? This will unsummon any controlled bet and the cost will increase each time.",
+	button1 = ACCEPT,
+	button2 = CANCEL,
+	OnAccept = function (self)
+		-- Close the popup
+		StaticPopup_Hide("CONFIRM_RESET_TALENTS");
+		
+		local previousSpecKey = selectedSpec;
+		local previousSelectedNumber = selectedSpecNumber;
+		local previousFrameGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or nil;
+		local previousTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
+		-- Send message to server with opcode 10
+		RequestServerAction(RESET_TALENTS_OP);
+		if ( previousSpecKey ) then
+			selectedSpec = previousSpecKey;
+		end
+		if ( type(previousSelectedNumber) == "number" and previousSelectedNumber > 0 ) then
+			selectedSpecNumber = previousSelectedNumber;
+		end
+		if ( PlayerTalentFrame ) then
+			if ( type(previousFrameGroup) == "number" and previousFrameGroup > 0 ) then
+				PlayerTalentFrame.talentGroup = previousFrameGroup;
+			end
+			if ( type(previousTab) == "number" ) then
+				PanelTemplates_SetTab(PlayerTalentFrame, previousTab);
+			end
+		end
+		PlayerTalentFrame_UpdateSpecTabChecks();
+		if ( type(PlayerTalentFrame_Refresh) == "function" ) then
+			PlayerTalentFrame_Refresh();
+		end
+		if ( PlayerTalentFrame and previousSpecKey and specTabs[previousSpecKey] ) then
+			specTabs[previousSpecKey]:SetChecked(true);
+		end
+	end,
+	OnCancel = function (self)
+		-- Just close the popup
+	end,
+	OnShow = function (self)
+		-- Get reset cost from SpecMap (global variable set in TalentFrameBase.lua)
+		local resetCost = 0;
+		if ( type(SpecMap) == "table" and type(SpecMap.resetCost) == "number" ) then
+			resetCost = SpecMap.resetCost;
+		end
+		
+		-- GetMoneyString already includes coin icons in the format
+		local moneyString = GetMoneyString(resetCost);
+		
+		-- Build the complete text with cost on new line
+		local baseText = "Do you want to unlearn all of your talents? This will unsummon any controlled bet and the cost will increase each time.";
+		local fullText = baseText .. "\n\n" .. moneyString;
+		
+		-- Set the text directly using the same method StaticPopup uses
+		local dialogName = self:GetName();
+		if ( dialogName ) then
+			local textFrame = _G[dialogName.."Text"];
+			if ( textFrame ) then
+				textFrame:SetText(fullText);
+			end
+		end
+	end,
+	hideOnEscape = 1,
+	timeout = 0,
+	exclusive = 1,
+}
+
 UIPanelWindows["PlayerTalentFrame"] = { area = "left", pushable = 1, whileDead = 1 };
 
 -- global constants
@@ -2099,33 +2166,7 @@ function PlayerTalentFrame_OnLoad(self)
 		-- Set button scripts
 		resetButton:SetScript("OnClick", function(self, button)
 			if ( button == "LeftButton" ) then
-				local previousSpecKey = selectedSpec;
-				local previousSelectedNumber = selectedSpecNumber;
-				local previousFrameGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or nil;
-				local previousTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
-				-- Send message to server with opcode 10
-				RequestServerAction(RESET_TALENTS_OP);
-				if ( previousSpecKey ) then
-					selectedSpec = previousSpecKey;
-				end
-				if ( type(previousSelectedNumber) == "number" and previousSelectedNumber > 0 ) then
-					selectedSpecNumber = previousSelectedNumber;
-				end
-				if ( PlayerTalentFrame ) then
-					if ( type(previousFrameGroup) == "number" and previousFrameGroup > 0 ) then
-						PlayerTalentFrame.talentGroup = previousFrameGroup;
-					end
-					if ( type(previousTab) == "number" ) then
-						PanelTemplates_SetTab(PlayerTalentFrame, previousTab);
-					end
-				end
-				PlayerTalentFrame_UpdateSpecTabChecks();
-				if ( type(PlayerTalentFrame_Refresh) == "function" ) then
-					PlayerTalentFrame_Refresh();
-				end
-				if ( PlayerTalentFrame and previousSpecKey and specTabs[previousSpecKey] ) then
-					specTabs[previousSpecKey]:SetChecked(true);
-				end
+				StaticPopup_Show("CONFIRM_RESET_TALENTS");
 			end
 		end);
 		
@@ -2489,13 +2530,9 @@ end
 function PlayerTalentFrameTalent_OnClick(self, button)
 	if ( IsModifiedClick("CHATLINK") ) then
 		local link = GetTalentLink(PanelTemplates_GetSelectedTab(PlayerTalentFrame), self:GetID(),
--			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
-		-- Debug: Print raw talent hyperlink
+			PlayerTalentFrame.inspect, PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup, GetCVarBool("previewTalents"));
 		if ( link ) then
-			print("DEBUG: Raw talent hyperlink (PlayerTalentFrameTalent_OnClick):", link);
 			ChatEdit_InsertLink(link);
-		else
-			print("DEBUG: GetTalentLink returned nil");
 		end
 	elseif ( selectedSpec and specs[selectedSpec].pet ) then
 		-- only allow functionality if an active spec is selected
@@ -2847,10 +2884,8 @@ function PlayerTalentFrameResetButton_OnClick(self)
 	if ( PlayerTalentFrame.pet ) then
 		ResetGroupPreviewTalentPoints(PlayerTalentFrame.pet, PlayerTalentFrame.talentGroup);
 	else
-		-- Reset the cache to match SpecMap data
-		SpecMap_BuildTalentCache();
-		-- Refresh the UI to show the reset state
-		PlayerTalentFrame_Refresh();
+		-- Show confirmation popup for talent reset
+		StaticPopup_Show("CONFIRM_RESET_TALENTS");
 	end
 end
 
@@ -3619,248 +3654,27 @@ function PlayerSpecTab_OnEnter(self)
 	GameTooltip:Show();
 end
 
--- Decode Spec Info Message
--- Decodes messages sent from the server in the format:
--- OP|freeTalents~specCount~activeSpec~spec0^spec1^...
--- Where each spec is: talentCount:talentId,tabId,rank;talentId,tabId,rank;...|glyph0,glyph1,glyph2,...
+-- DecodeSpecInfo function and listener frame have been moved to TalentFrameBase.lua
+-- so they are initialized when the UI loads, not just when the talent UI is first opened.
 
--- Constants
--- Note: SPEC_INFO_OP is now defined globally at the top of the file
-
--- Main decode function
-local function DecodeSpecInfo(message)
-    if not message or message == "" then
-        return nil
-    end
-    
-    local result = {
-        op = nil,
-        freeTalents = nil,
-        specCount = nil,
-        activeSpec = nil,
-        specs = {}
-    }
-    
-    -- Split by OP delimiter to get OP code and data
-    local opDelimiter = string.find(message, "|")
-    if not opDelimiter then
-        return nil -- Invalid format
-    end
-    
-    -- Extract OP code (everything before first |)
-    local opCode = tonumber(string.sub(message, 1, opDelimiter - 1))
-    result.op = opCode
-    
-    -- Verify OP code matches expected value
-    if opCode ~= SPEC_INFO_OP then
-        return nil -- Wrong OP code
-    end
-    
-    -- Extract data portion (everything after first |)
-    local data = string.sub(message, opDelimiter + 1)
-    
-    -- Split player-level data by ~ delimiter
-    local playerDataParts = {}
-    for part in string.gmatch(data, "([^~]+)") do
-        table.insert(playerDataParts, part)
-    end
-    
-    -- Need at least 3 parts: freeTalents, specCount, activeSpec
-    if #playerDataParts < 3 then
-        return nil -- Invalid format
-    end
-    
-    -- Extract player-level data
-    result.freeTalents = tonumber(playerDataParts[1])
-    result.specCount = tonumber(playerDataParts[2])
-    result.activeSpec = tonumber(playerDataParts[3]) + 1 -- 0-indexed to 1-indexed
-
-    -- The 4th part (if exists) contains all spec data
-    -- Format: spec0^spec1^spec2^...
-    local specData = playerDataParts[4]
-    
-    -- If there's no spec data, return early
-    if not specData or specData == "" then
-        return result
-    end
-    
-    -- Split specs by ^ delimiter
-    local specParts = {}
-    for part in string.gmatch(specData, "([^^]+)") do
-        table.insert(specParts, part)
-    end
-    
-    -- Decode each spec
-    for specIndex, specString in ipairs(specParts) do
-        local spec = {
-            index = specIndex - 1, -- 0-indexed
-            talentCount = 0,
-            talents = {},
-            glyphs = {}
-        }
-        
-        -- Split spec by | to separate talents from glyphs
-        local pipePos = string.find(specString, "|")
-        local talentData, glyphData
-        
-        if pipePos then
-            -- Has both talents and glyphs
-            talentData = string.sub(specString, 1, pipePos - 1)
-            glyphData = string.sub(specString, pipePos + 1)
-        else
-            -- No pipe means no glyphs, only talents (shouldn't happen based on C++ code, but handle it)
-            talentData = specString
-            glyphData = ""
-        end
-        
-        
-        -- Parse talent data
-        -- Format: talentCount:talentId,tabId,rank,prereqId,prereqRank;talentId,tabId,rank,prereqId,prereqRank;...
-        local colonPos = string.find(talentData, ":")
-        if colonPos then
-            local countStr = string.sub(talentData, 1, colonPos - 1)
-            spec.talentCount = tonumber(countStr) or 0
-            
-            local talentListStr = string.sub(talentData, colonPos + 1)
-            if talentListStr and talentListStr ~= "" then
-                -- Split talents by ;
-                for talentStr in string.gmatch(talentListStr, "([^;]+)") do
-                    -- Split talent by ,
-                    local talentParts = {}
-                    for part in string.gmatch(talentStr, "([^,]+)") do
-                        table.insert(talentParts, part)
-                    end
-                    
-                    local talentInfo = {
-                        talentId = tonumber(talentParts[1]),
-                        tabId = tonumber(talentParts[2]),
-                        rank = tonumber(talentParts[3]),
-                    }
-                    -- Prerequisite information will be populated from base game API in SpecMap_BuildTalentCache
-                    if talentInfo.talentId and talentInfo.tabId and talentInfo.rank ~= nil then
-                        table.insert(spec.talents, talentInfo)
-                    end
-                end
-            end
-        end
-        
-        -- Parse glyph data
-        -- Format: glyphId$spellId$iconId,glyphId$spellId$iconId,...
-        if glyphData and glyphData ~= "" then
-            -- Trim whitespace from glyphData
-            glyphData = string.gsub(glyphData, "^%s+", "")
-            glyphData = string.gsub(glyphData, "%s+$", "")
-            
-            -- Split glyphs by ,
-            for glyphStr in string.gmatch(glyphData, "([^,]+)") do
-                -- Trim whitespace from each glyph string
-                glyphStr = string.gsub(glyphStr, "^%s+", "")
-                glyphStr = string.gsub(glyphStr, "%s+$", "")
-                
-                if glyphStr and glyphStr ~= "" then
-                    -- Split glyph entry by $ to get glyph ID, spell ID, and icon ID
-                    -- Use plain string matching (not pattern) for the dollar sign
-                    local parts = {}
-                    local startPos = 1
-                    while true do
-                        local dollarPos = string.find(glyphStr, "$", startPos, true)
-                        if not dollarPos then
-                            -- Last part
-                            table.insert(parts, string.sub(glyphStr, startPos))
-                            break
-                        else
-                            table.insert(parts, string.sub(glyphStr, startPos, dollarPos - 1))
-                            startPos = dollarPos + 1
-                        end
-                    end
-                    
-                    if #parts >= 2 then
-                        -- Has at least glyph ID and spell ID
-                        local glyphId = tonumber(parts[1])
-                        local spellId = tonumber(parts[2])
-                        local iconId = (#parts >= 3) and tonumber(parts[3]) or nil
-                        
-                        if glyphId and spellId then
-                            table.insert(spec.glyphs, {
-                                glyphId = glyphId,
-                                spellId = spellId,
-                                iconId = iconId
-                            })
-                            -- Populate the glyph lookup table for faster access
-                            if ( type(SpecMapGlyphIndexToSpellID) == "table" ) then
-                                SpecMapGlyphIndexToSpellID[glyphId] = spellId;
-                            end
-                        end
-                    else
-                        -- Fallback: try to parse as single number (backward compatibility)
-                        local glyphEntry = tonumber(glyphStr)
-                        if glyphEntry then
-                            table.insert(spec.glyphs, {
-                                glyphId = glyphEntry,
-                                spellId = nil, -- Will need to be converted later
-                                iconId = nil
-                            })
-                        end
-                    end
-                end
-            end
-        end
-        
-        table.insert(result.specs, spec)
-    end
-    
-    return result
+-- Message prefix constants (also defined in TalentFrameBase.lua, but kept here for compatibility)
+if ( not MESSAGE_PREFIX_SERVER ) then
+	MESSAGE_PREFIX_SERVER = "AC_CU_SERVER_MSG"
+end
+if ( not MESSAGE_PREFIX_GET ) then
+	MESSAGE_PREFIX_GET = "AC_CU_GET"
+end
+if ( not MESSAGE_PREFIX_POST ) then
+	MESSAGE_PREFIX_POST = "AC_CU_POST"
 end
 
--- Export for use in addon
--- Usage example in a WoW addon:
---[[
-    local decoded = DecodeSpecInfo(message)
-    if decoded then
-        print("Free Talents: " .. decoded.freeTalents)
-        print("Active Spec: " .. decoded.activeSpec)
-        for i, spec in ipairs(decoded.specs) do
-            print("Spec " .. i .. " has " .. #spec.talents .. " talents")
-            for j, talent in ipairs(spec.talents) do
-                -- talent.talentId, talent.tabId, talent.rank
-            end
-            for j, glyph in ipairs(spec.glyphs) do
-                -- glyph is the glyph entry ID
-            end
-        end
-    end
-]]
-
-MESSAGE_PREFIX_SERVER = "AC_CU_SERVER_MSG"
-MESSAGE_PREFIX_GET = "AC_CU_GET"
-MESSAGE_PREFIX_POST = "AC_CU_POST"
-SpecMap = {}
-
---- Listen for Spec Info message
-local fs = CreateFrame("Frame")
-fs:RegisterEvent("CHAT_MSG_ADDON")
-fs:SetScript("OnEvent", function(self, event, ...)
-    local prefix, msg, msgType, sender = ...
-	if event ~= "CHAT_MSG_ADDON" or prefix ~= MESSAGE_PREFIX_SERVER or msgType ~= "WHISPER" then
-        return
-    end
-
-	local decoded = DecodeSpecInfo(msg)
-	if ( decoded ) then
-		SpecMap = decoded
-		PlayerTalentFrame_HandleSpecMapUpdate()
-	end
-end)
-
-function PushQueryServer(Msg)
-	SendAddonMessage(MESSAGE_PREFIX_GET, Msg, "WHISPER", UnitName("player"))
+-- SpecMap initialization (also done in TalentFrameBase.lua, but kept here for compatibility)
+if ( type(SpecMap) ~= "table" ) then
+	SpecMap = {}
 end
 
-function RequestServerAction(Msg)
-	SendAddonMessage(MESSAGE_PREFIX_POST, Msg, "WHISPER", UnitName("player"))
-end
-
-PushQueryServer("7")
+-- PushQueryServer and RequestServerAction functions have been moved to TalentFrameBase.lua
+-- so they are available when the UI loads, not just when the talent UI is first opened.
 
 if ( not SpecMapBaseTalentWrappersInitialized ) then
 	SpecMapBaseTalentWrappersInitialized = true;

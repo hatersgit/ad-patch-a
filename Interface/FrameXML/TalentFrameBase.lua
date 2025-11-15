@@ -18,6 +18,12 @@ TREE_WIDTH = 160; -- Approximate width of one talent tree
 
 TALENT_HYBRID_ICON = "Interface\\Icons\\Ability_DualWieldSpecialization";
 
+-- Talent System Opcodes and Message Prefixes
+SPEC_INFO_OP = 7;
+MESSAGE_PREFIX_SERVER = "AC_CU_SERVER_MSG";
+MESSAGE_PREFIX_GET = "AC_CU_GET";
+MESSAGE_PREFIX_POST = "AC_CU_POST";
+
 TALENT_BRANCH_TEXTURECOORDS = {
 	up = {
 		[1] = {0.12890625, 0.25390625, 0 , 0.484375},
@@ -1708,13 +1714,8 @@ function HandlePlayerTalentButtonClick(self, button, TalentFrame)
 		local tabIndex = self.tabIndex;
 		local talentIndex = self:GetID();
 		local link = GetTalentLink(tabIndex, talentIndex, TalentFrame.inspect, TalentFrame.pet, SpecMap_ResolveTalentGroupForBaseAPI(TalentFrame.talentGroup), true);
-		-- Debug: Print raw talent hyperlink
 		if ( link ) then
-			print("DEBUG: Raw talent hyperlink (HandlePlayerTalentButtonClick):", link);
-			print("DEBUG: tabIndex="..tabIndex..", talentIndex="..talentIndex..", talentGroup="..tostring(TalentFrame.talentGroup)..", previewTalents="..tostring(GetCVarBool("previewTalents")));
 			ChatEdit_InsertLink(link);
-		else
-			print("DEBUG: GetTalentLink returned nil - tabIndex="..tabIndex..", talentIndex="..talentIndex..", talentGroup="..tostring(TalentFrame.talentGroup));
 		end
 		return;
 	end
@@ -1900,4 +1901,247 @@ function TalentFrame_UpdateSpecInfoCache(cache, inspect, pet, talentGroup)
 	end
 end
 
+-- Decode Spec Info Message
+-- Decodes messages sent from the server in the format:
+-- OP|freeTalents~specCount~activeSpec~resetCost~spec0^spec1^...
+-- Where resetCost is the total copper cost of the next talent reset
+-- Where each spec is: talentCount:talentId,tabId,rank;talentId,tabId,rank;...|glyph0,glyph1,glyph2,...
+function DecodeSpecInfo(message)
+    if not message or message == "" then
+        return nil
+    end
+    
+    local result = {
+        op = nil,
+        freeTalents = nil,
+        specCount = nil,
+        activeSpec = nil,
+        resetCost = nil,
+        specs = {}
+    }
+    
+    -- Split by OP delimiter to get OP code and data
+    local opDelimiter = string.find(message, "|")
+    if not opDelimiter then
+        return nil -- Invalid format
+    end
+    
+    -- Extract OP code (everything before first |)
+    local opCode = tonumber(string.sub(message, 1, opDelimiter - 1))
+    result.op = opCode
+    
+    -- Verify OP code matches expected value
+    if opCode ~= SPEC_INFO_OP then
+        return nil -- Wrong OP code
+    end
+    
+    -- Extract data portion (everything after first |)
+    local data = string.sub(message, opDelimiter + 1)
+    
+    -- Split player-level data by ~ delimiter
+    local playerDataParts = {}
+    for part in string.gmatch(data, "([^~]+)") do
+        table.insert(playerDataParts, part)
+    end
+    
+    -- Need at least 3 parts: freeTalents, specCount, activeSpec
+    -- New format includes resetCost as 4th part
+    if #playerDataParts < 3 then
+        return nil -- Invalid format
+    end
+    
+    -- Extract player-level data
+    result.freeTalents = tonumber(playerDataParts[1])
+    result.specCount = tonumber(playerDataParts[2])
+    result.activeSpec = tonumber(playerDataParts[3]) + 1 -- 0-indexed to 1-indexed
+    
+    -- Extract reset cost (4th part, if exists)
+    if #playerDataParts >= 4 then
+        result.resetCost = tonumber(playerDataParts[4])
+    end
 
+    -- The 5th part (if exists) contains all spec data
+    -- Format: spec0^spec1^spec2^...
+    local specData = playerDataParts[5]
+    
+    -- If there's no spec data, return early
+    if not specData or specData == "" then
+        return result
+    end
+    
+    -- Split specs by ^ delimiter
+    local specParts = {}
+    for part in string.gmatch(specData, "([^^]+)") do
+        table.insert(specParts, part)
+    end
+    
+    -- Decode each spec
+    for specIndex, specString in ipairs(specParts) do
+        local spec = {
+            index = specIndex - 1, -- 0-indexed
+            talentCount = 0,
+            talents = {},
+            glyphs = {}
+        }
+        
+        -- Split spec by | to separate talents from glyphs
+        local pipePos = string.find(specString, "|")
+        local talentData, glyphData
+        
+        if pipePos then
+            -- Has both talents and glyphs
+            talentData = string.sub(specString, 1, pipePos - 1)
+            glyphData = string.sub(specString, pipePos + 1)
+        else
+            -- No pipe means no glyphs, only talents (shouldn't happen based on C++ code, but handle it)
+            talentData = specString
+            glyphData = ""
+        end
+        
+        
+        -- Parse talent data
+        -- Format: talentCount:talentId,tabId,rank,prereqId,prereqRank;talentId,tabId,rank,prereqId,prereqRank;...
+        local colonPos = string.find(talentData, ":")
+        if colonPos then
+            local countStr = string.sub(talentData, 1, colonPos - 1)
+            spec.talentCount = tonumber(countStr) or 0
+            
+            local talentListStr = string.sub(talentData, colonPos + 1)
+            if talentListStr and talentListStr ~= "" then
+                -- Split talents by ;
+                for talentStr in string.gmatch(talentListStr, "([^;]+)") do
+                    -- Split talent by ,
+                    local talentParts = {}
+                    for part in string.gmatch(talentStr, "([^,]+)") do
+                        table.insert(talentParts, part)
+                    end
+                    
+                    local talentInfo = {
+                        talentId = tonumber(talentParts[1]),
+                        tabId = tonumber(talentParts[2]),
+                        rank = tonumber(talentParts[3]),
+                    }
+                    -- Prerequisite information will be populated from base game API in SpecMap_BuildTalentCache
+                    if talentInfo.talentId and talentInfo.tabId and talentInfo.rank ~= nil then
+                        table.insert(spec.talents, talentInfo)
+                    end
+                end
+            end
+        end
+        
+        -- Parse glyph data
+        -- Format: glyphId$spellId$iconId,glyphId$spellId$iconId,...
+        if glyphData and glyphData ~= "" then
+            -- Trim whitespace from glyphData
+            glyphData = string.gsub(glyphData, "^%s+", "")
+            glyphData = string.gsub(glyphData, "%s+$", "")
+            
+            -- Split glyphs by ,
+            for glyphStr in string.gmatch(glyphData, "([^,]+)") do
+                -- Trim whitespace from each glyph string
+                glyphStr = string.gsub(glyphStr, "^%s+", "")
+                glyphStr = string.gsub(glyphStr, "%s+$", "")
+                
+                if glyphStr and glyphStr ~= "" then
+                    -- Split glyph entry by $ to get glyph ID, spell ID, and icon ID
+                    -- Use plain string matching (not pattern) for the dollar sign
+                    local parts = {}
+                    local startPos = 1
+                    while true do
+                        local dollarPos = string.find(glyphStr, "$", startPos, true)
+                        if not dollarPos then
+                            -- Last part
+                            table.insert(parts, string.sub(glyphStr, startPos))
+                            break
+                        else
+                            table.insert(parts, string.sub(glyphStr, startPos, dollarPos - 1))
+                            startPos = dollarPos + 1
+                        end
+                    end
+                    
+                    if #parts >= 2 then
+                        -- Has at least glyph ID and spell ID
+                        local glyphId = tonumber(parts[1])
+                        local spellId = tonumber(parts[2])
+                        local iconId = (#parts >= 3) and tonumber(parts[3]) or nil
+                        
+                        if glyphId and spellId then
+                            table.insert(spec.glyphs, {
+                                glyphId = glyphId,
+                                spellId = spellId,
+                                iconId = iconId
+                            })
+                            -- Populate the glyph lookup table for faster access
+                            if ( type(SpecMapGlyphIndexToSpellID) == "table" ) then
+                                SpecMapGlyphIndexToSpellID[glyphId] = spellId;
+                            end
+                        end
+                    else
+                        -- Fallback: try to parse as single number (backward compatibility)
+                        local glyphEntry = tonumber(glyphStr)
+                        if glyphEntry then
+                            table.insert(spec.glyphs, {
+                                glyphId = glyphEntry,
+                                spellId = nil, -- Will need to be converted later
+                                iconId = nil
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        
+        table.insert(result.specs, spec)
+    end
+    
+    return result
+end
+
+-- Initialize SpecMap if not already initialized
+if ( type(SpecMap) ~= "table" ) then
+    SpecMap = {}
+end
+
+-- Helper functions to query server (defined here so they're available when file loads)
+function PushQueryServer(Msg)
+    SendAddonMessage(MESSAGE_PREFIX_GET, Msg, "WHISPER", UnitName("player"))
+end
+
+function RequestServerAction(Msg)
+    SendAddonMessage(MESSAGE_PREFIX_POST, Msg, "WHISPER", UnitName("player"))
+end
+
+-- Listen for Spec Info message
+local specInfoListenerFrame = CreateFrame("Frame")
+specInfoListenerFrame:RegisterEvent("CHAT_MSG_ADDON")
+specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
+    
+    if event == "CHAT_MSG_ADDON" then
+        local prefix, msg, msgType, sender = ...
+        if prefix ~= MESSAGE_PREFIX_SERVER or msgType ~= "WHISPER" then
+            return
+        end
+
+        local decoded = DecodeSpecInfo(msg)
+        if ( decoded ) then
+            -- Update SpecMap with all decoded data (including resetCost, activeSpec, specs, etc.)
+            SpecMap = decoded
+            -- Update activeSpecNumber immediately when spec info changes
+            if ( decoded.activeSpec and type(decoded.activeSpec) == "number" ) then
+                -- decoded.activeSpec is already 1-based (converted in DecodeSpecInfo)
+                _G["activeSpecNumber"] = decoded.activeSpec
+            end
+            -- resetCost is automatically updated via SpecMap = decoded assignment above
+            -- Call update handler if it exists (defined in Blizzard_TalentUI.lua)
+            if ( type(PlayerTalentFrame_HandleSpecMapUpdate) == "function" ) then
+                PlayerTalentFrame_HandleSpecMapUpdate()
+            end
+        end
+    end
+end)
+
+-- If player is already logged in when this file loads, query immediately
+-- Otherwise, wait for PLAYER_LOGIN event
+if ( UnitName("player") and UnitName("player") ~= "" ) then
+    PushQueryServer("7")
+end
