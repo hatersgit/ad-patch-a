@@ -397,6 +397,10 @@ local function EnsurePlayerSpecTab(specIndex)
 	local specKey = "spec"..specIndex;
 	if ( specTabs[specKey] ) then
 		playerSpecTabFrames[specIndex] = specTabs[specKey];
+		-- Ensure existing tab is shown
+		if ( specTabs[specKey] ) then
+			specTabs[specKey]:Show();
+		end
 		return specTabs[specKey];
 	end
 
@@ -404,9 +408,21 @@ local function EnsurePlayerSpecTab(specIndex)
 		return nil;
 	end
 
-	local nextIndex = numSpecTabs + 1;
+	-- Find the next available tab index, starting from 1
+	-- Skip PlayerSpecTab3 if it exists and is for pets (petspec1)
+	local nextIndex = 1;
 	while ( _G["PlayerSpecTab"..nextIndex] ) do
-		nextIndex = nextIndex + 1;
+		local existingTab = _G["PlayerSpecTab"..nextIndex];
+		-- Check if this tab is already used for a player spec (not pet)
+		if ( existingTab.specIndex and existingTab.specIndex ~= "petspec1" ) then
+			nextIndex = nextIndex + 1;
+		elseif ( existingTab.specIndex == "petspec1" ) then
+			-- Skip PlayerSpecTab3 if it's for pets, use PlayerSpecTab4 instead
+			nextIndex = nextIndex + 1;
+		else
+			-- Tab exists but not assigned yet, check if we can use it
+			nextIndex = nextIndex + 1;
+		end
 	end
 
 	local frameName = "PlayerSpecTab"..nextIndex;
@@ -416,15 +432,23 @@ local function EnsurePlayerSpecTab(specIndex)
 
 	PlayerSpecTab_Load(frame, specKey);
 	playerSpecTabFrames[specIndex] = frame;
+	
+	-- Ensure the tab is shown after creation
+	frame:Show();
 
 	return frame;
 end
 
 local function HideUnusedPlayerSpecTabs(specCount)
 	for index, frame in pairs(playerSpecTabFrames) do
-		if ( frame and index > specCount ) then
-			frame:Hide();
-			frame:SetChecked(false);
+		if ( frame ) then
+			if ( index > specCount ) then
+				frame:Hide();
+				frame:SetChecked(false);
+			else
+				-- Ensure tabs that should be visible are shown
+				frame:Show();
+			end
 		end
 	end
 end
@@ -1516,11 +1540,14 @@ function SpecMap_GetTalentRank(talentGroup, tabIndex, talentIndex, talentID)
 	return nil;
 end
 
-local function PlayerTalentFrame_HandleSpecMapUpdate()
+function PlayerTalentFrame_HandleSpecMapUpdate()
+	print("DEBUG: PlayerTalentFrame_HandleSpecMapUpdate called");
 	if ( not PlayerTalentFrame ) then
+		print("DEBUG: PlayerTalentFrame is nil, returning");
 		return;
 	end
 
+	print("DEBUG: Building talent cache");
 	SpecMap_BuildTalentCache();
 
 	local activeTalentGroup = SpecMap_GetActiveTalentGroup();
@@ -1539,11 +1566,52 @@ local function PlayerTalentFrame_HandleSpecMapUpdate()
 	if ( specMap and type(specMap.specCount) == "number" ) then
 		specCount = specMap.specCount;
 	end
+	
+	-- Ensure specCount matches the actual number of specs in the array
+	-- This handles cases where specCount might be incorrect or specs array has more/fewer entries
+	if ( specMap and type(specMap.specs) == "table" ) then
+		-- Count actual specs by finding the maximum numeric key
+		local actualSpecCount = 0;
+		for k, v in pairs(specMap.specs) do
+			if ( type(k) == "number" and k > actualSpecCount ) then
+				actualSpecCount = k;
+			end
+		end
+		-- Also check sequential entries to ensure we have all of them
+		if ( actualSpecCount > 0 ) then
+			-- Verify we have entries for 1 through actualSpecCount
+			for i = 1, actualSpecCount do
+				if ( not specMap.specs[i] ) then
+					-- If we're missing an entry, stop counting here
+					actualSpecCount = i - 1;
+					break;
+				end
+			end
+		end
+		if ( actualSpecCount > 0 ) then
+			-- Use the larger of the two (specCount from message or actual array length)
+			-- This ensures we process all specs even if specCount is wrong
+			specCount = math.max(specCount or 0, actualSpecCount);
+		end
+	end
 
 	-- Ensure we have spec definitions and tabs for each available specialization
 	if ( specCount and specCount > 0 ) then
+		-- Debug: Print spec count and verify all specs exist
+		print("DEBUG: specCount = " .. tostring(specCount));
+		if ( specMap and type(specMap.specs) == "table" ) then
+			for i = 1, specCount do
+				if ( specMap.specs[i] ) then
+					print("DEBUG: specMap.specs[" .. i .. "] exists");
+				else
+					print("DEBUG: specMap.specs[" .. i .. "] is MISSING!");
+				end
+			end
+		end
+		
 		for index = 1, specCount do
 			local specData = specMap and specMap.specs and specMap.specs[index] or nil;
+			print("DEBUG: Processing spec " .. index .. ", specData = " .. tostring(specData ~= nil));
 			local totals = { 0, 0, 0 };
 			if ( specData and type(specData.talents) == "table" ) then
 				for _, talentData in ipairs(specData.talents) do
@@ -1568,6 +1636,15 @@ local function PlayerTalentFrame_HandleSpecMapUpdate()
 			end
 		end
 		HideUnusedPlayerSpecTabs(specCount);
+		
+		-- Ensure all valid spec tabs are shown and positioned correctly
+		-- This is important for dynamically created tabs beyond the first 2
+		for index = 1, specCount do
+			local frame = playerSpecTabFrames[index];
+			if ( frame ) then
+				frame:Show();
+			end
+		end
 	end
 	
 	-- Also update base game active spec if possible (this ensures GetActiveTalentGroup returns correct value)
@@ -3764,4 +3841,25 @@ if ( type(activeSpecNumber) ~= "number" or activeSpecNumber <= 0 ) then
 		activeFromSpecMap = GetActiveTalentGroup(false, false) or 1;
 	end
 	activeSpecNumber = activeFromSpecMap;
+end
+
+-- If SpecMap was already loaded before this file (from TalentFrameBase.lua),
+-- call the update handler to ensure tabs are created
+if ( type(SpecMap) == "table" and type(SpecMap.specs) == "table" and #SpecMap.specs > 0 ) then
+	print("DEBUG: SpecMap already exists when Blizzard_TalentUI.lua loaded, calling HandleSpecMapUpdate");
+	-- Use a small delay to ensure PlayerTalentFrame is initialized
+	local initFrame = CreateFrame("Frame")
+	initFrame:RegisterEvent("ADDON_LOADED")
+	initFrame:SetScript("OnEvent", function(self, event, addonName)
+		if ( addonName == "Blizzard_TalentUI" ) then
+			if ( type(PlayerTalentFrame_HandleSpecMapUpdate) == "function" ) then
+				PlayerTalentFrame_HandleSpecMapUpdate()
+			end
+			self:UnregisterEvent("ADDON_LOADED")
+		end
+	end)
+	-- Also try immediately in case ADDON_LOADED already fired
+	if ( PlayerTalentFrame and type(PlayerTalentFrame_HandleSpecMapUpdate) == "function" ) then
+		PlayerTalentFrame_HandleSpecMapUpdate()
+	end
 end

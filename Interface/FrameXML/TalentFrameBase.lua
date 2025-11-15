@@ -1971,8 +1971,18 @@ function DecodeSpecInfo(message)
     
     -- Split specs by ^ delimiter
     local specParts = {}
-    for part in string.gmatch(specData, "([^^]+)") do
-        table.insert(specParts, part)
+    -- Use a more reliable splitting method
+    local startPos = 1
+    while startPos <= #specData do
+        local caretPos = string.find(specData, "%^", startPos)
+        if caretPos then
+            table.insert(specParts, string.sub(specData, startPos, caretPos - 1))
+            startPos = caretPos + 1
+        else
+            -- Last part (no more ^)
+            table.insert(specParts, string.sub(specData, startPos))
+            break
+        end
     end
     
     -- Decode each spec
@@ -2114,6 +2124,7 @@ end
 -- Listen for Spec Info message
 local specInfoListenerFrame = CreateFrame("Frame")
 specInfoListenerFrame:RegisterEvent("CHAT_MSG_ADDON")
+specInfoListenerFrame:RegisterEvent("PLAYER_LOGIN")
 specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
     
     if event == "CHAT_MSG_ADDON" then
@@ -2122,8 +2133,11 @@ specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
+		print("msg: " .. msg)
+
         local decoded = DecodeSpecInfo(msg)
         if ( decoded ) then
+            print("DEBUG: Decoded spec info, specCount = " .. tostring(decoded.specCount) .. ", specs array length = " .. tostring(decoded.specs and #decoded.specs or 0));
             -- Update SpecMap with all decoded data (including resetCost, activeSpec, specs, etc.)
             SpecMap = decoded
             -- Update activeSpecNumber immediately when spec info changes
@@ -2133,9 +2147,27 @@ specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
             end
             -- resetCost is automatically updated via SpecMap = decoded assignment above
             -- Call update handler if it exists (defined in Blizzard_TalentUI.lua)
+            -- Use a delayed call to ensure Blizzard_TalentUI.lua has loaded
             if ( type(PlayerTalentFrame_HandleSpecMapUpdate) == "function" ) then
                 PlayerTalentFrame_HandleSpecMapUpdate()
+            else
+                -- Function not loaded yet, schedule it to run after a short delay
+                -- This handles the case where TalentFrameBase.lua loads before Blizzard_TalentUI.lua
+                local delayFrame = CreateFrame("Frame")
+                local attempts = 0
+                delayFrame:SetScript("OnUpdate", function(self, elapsed)
+                    attempts = attempts + 1
+                    if ( type(PlayerTalentFrame_HandleSpecMapUpdate) == "function" ) then
+                        PlayerTalentFrame_HandleSpecMapUpdate()
+                        self:SetScript("OnUpdate", nil)
+                    elseif ( attempts > 100 ) then
+                        -- Give up after 10 seconds (100 frames at ~0.1s per frame)
+                        self:SetScript("OnUpdate", nil)
+                    end
+                end)
             end
+        else
+            print("DEBUG: DecodeSpecInfo returned nil");
         end
     end
 end)
