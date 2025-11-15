@@ -4,6 +4,34 @@ GLYPHTYPE_MINOR = 2;
 GLYPH_MINOR = { r = 0, g = 0.25, b = 1};
 GLYPH_MAJOR = { r = 1, g = 0.25, b = 0};
 
+-- Static popup for confirming glyph removal (uses activeSpecNumber instead of GetActiveTalentGroup)
+StaticPopupDialogs["CONFIRM_REMOVE_GLYPH_SPECMAP"] = {
+	text = CONFIRM_REMOVE_GLYPH,
+	button1 = YES,
+	button2 = NO,
+	OnAccept = function (self)
+		local talentGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or 1;
+		-- Use activeSpecNumber global variable instead of GetActiveTalentGroup()
+		local isActiveSpec = false;
+		if ( type(activeSpecNumber) == "number" and type(selectedSpecNumber) == "number" ) then
+			isActiveSpec = (selectedSpecNumber == activeSpecNumber);
+		elseif ( type(activeSpecNumber) == "number" ) then
+			isActiveSpec = (talentGroup == activeSpecNumber);
+		else
+			-- Fallback to base game API if activeSpecNumber is not available
+			isActiveSpec = (talentGroup == GetActiveTalentGroup());
+		end
+		if ( isActiveSpec ) then
+			RemoveGlyphFromSocket(self.data);
+		end
+	end,
+	OnCancel = function (self)
+	end,
+	hideOnEscape = 1,
+	timeout = 0,
+	exclusive = 1,
+}
+
 local GLYPH_ICON_TEXTURES = {
 	[3098] = "Interface\\Spellbook\\UI-Glyph-Rune-11",
 	[2681] = "Interface\\Icons\\Creature_sporemushroom",
@@ -401,8 +429,10 @@ function GlyphFrameGlyph_OnClick (self, button)
 			end
 			if ( glyphSpell ) then
 				glyphName = GetSpellInfo(glyphSpell);
-				local dialog = StaticPopup_Show("CONFIRM_REMOVE_GLYPH", glyphName);
-				dialog.data = id;
+				local dialog = StaticPopup_Show("CONFIRM_REMOVE_GLYPH_SPECMAP", glyphName);
+				if ( dialog ) then
+					dialog.data = id;
+				end
 			end
 		end
 	elseif ( isActiveSpec ) then
