@@ -168,12 +168,16 @@ StaticPopupDialogs["CONFIRM_RESET_TALENTS"] = {
 		-- Close the popup
 		StaticPopup_Hide("CONFIRM_RESET_TALENTS");
 		
+		-- Store previous state (selectedSpec and selectedSpecNumber are global)
 		local previousSpecKey = selectedSpec;
 		local previousSelectedNumber = selectedSpecNumber;
 		local previousFrameGroup = PlayerTalentFrame and PlayerTalentFrame.talentGroup or nil;
-		local previousTab = PanelTemplates_GetSelectedTab(PlayerTalentFrame);
+		local previousTab = PlayerTalentFrame and PanelTemplates_GetSelectedTab(PlayerTalentFrame) or nil;
+		
 		-- Send message to server with opcode 10
 		RequestServerAction(RESET_TALENTS_OP);
+		
+		-- Restore previous state after reset
 		if ( previousSpecKey ) then
 			selectedSpec = previousSpecKey;
 		end
@@ -188,10 +192,8 @@ StaticPopupDialogs["CONFIRM_RESET_TALENTS"] = {
 				PanelTemplates_SetTab(PlayerTalentFrame, previousTab);
 			end
 		end
-		-- Update spec tab checks manually (PlayerTalentFrame_UpdateSpecTabChecks is local, so not accessible here)
-		if ( PlayerTalentFrame and previousSpecKey and specTabs[previousSpecKey] ) then
-			specTabs[previousSpecKey]:SetChecked(true);
-		end
+		
+		-- Refresh the talent frame (this will update spec tabs and other UI elements)
 		if ( type(PlayerTalentFrame_Refresh) == "function" ) then
 			PlayerTalentFrame_Refresh();
 		end
