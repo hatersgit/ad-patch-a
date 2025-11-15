@@ -188,12 +188,12 @@ StaticPopupDialogs["CONFIRM_RESET_TALENTS"] = {
 				PanelTemplates_SetTab(PlayerTalentFrame, previousTab);
 			end
 		end
-		PlayerTalentFrame_UpdateSpecTabChecks();
-		if ( type(PlayerTalentFrame_Refresh) == "function" ) then
-			PlayerTalentFrame_Refresh();
-		end
+		-- Update spec tab checks manually (PlayerTalentFrame_UpdateSpecTabChecks is local, so not accessible here)
 		if ( PlayerTalentFrame and previousSpecKey and specTabs[previousSpecKey] ) then
 			specTabs[previousSpecKey]:SetChecked(true);
+		end
+		if ( type(PlayerTalentFrame_Refresh) == "function" ) then
+			PlayerTalentFrame_Refresh();
 		end
 	end,
 	OnCancel = function (self)
