@@ -1541,13 +1541,10 @@ function SpecMap_GetTalentRank(talentGroup, tabIndex, talentIndex, talentID)
 end
 
 function PlayerTalentFrame_HandleSpecMapUpdate()
-	print("DEBUG: PlayerTalentFrame_HandleSpecMapUpdate called");
 	if ( not PlayerTalentFrame ) then
-		print("DEBUG: PlayerTalentFrame is nil, returning");
 		return;
 	end
 
-	print("DEBUG: Building talent cache");
 	SpecMap_BuildTalentCache();
 
 	local activeTalentGroup = SpecMap_GetActiveTalentGroup();
@@ -1597,21 +1594,8 @@ function PlayerTalentFrame_HandleSpecMapUpdate()
 
 	-- Ensure we have spec definitions and tabs for each available specialization
 	if ( specCount and specCount > 0 ) then
-		-- Debug: Print spec count and verify all specs exist
-		print("DEBUG: specCount = " .. tostring(specCount));
-		if ( specMap and type(specMap.specs) == "table" ) then
-			for i = 1, specCount do
-				if ( specMap.specs[i] ) then
-					print("DEBUG: specMap.specs[" .. i .. "] exists");
-				else
-					print("DEBUG: specMap.specs[" .. i .. "] is MISSING!");
-				end
-			end
-		end
-		
 		for index = 1, specCount do
 			local specData = specMap and specMap.specs and specMap.specs[index] or nil;
-			print("DEBUG: Processing spec " .. index .. ", specData = " .. tostring(specData ~= nil));
 			local totals = { 0, 0, 0 };
 			if ( specData and type(specData.talents) == "table" ) then
 				for _, talentData in ipairs(specData.talents) do
@@ -3846,7 +3830,6 @@ end
 -- If SpecMap was already loaded before this file (from TalentFrameBase.lua),
 -- call the update handler to ensure tabs are created
 if ( type(SpecMap) == "table" and type(SpecMap.specs) == "table" and #SpecMap.specs > 0 ) then
-	print("DEBUG: SpecMap already exists when Blizzard_TalentUI.lua loaded, calling HandleSpecMapUpdate");
 	-- Use a small delay to ensure PlayerTalentFrame is initialized
 	local initFrame = CreateFrame("Frame")
 	initFrame:RegisterEvent("ADDON_LOADED")

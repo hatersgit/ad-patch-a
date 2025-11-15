@@ -2133,11 +2133,8 @@ specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
-		print("msg: " .. msg)
-
         local decoded = DecodeSpecInfo(msg)
         if ( decoded ) then
-            print("DEBUG: Decoded spec info, specCount = " .. tostring(decoded.specCount) .. ", specs array length = " .. tostring(decoded.specs and #decoded.specs or 0));
             -- Update SpecMap with all decoded data (including resetCost, activeSpec, specs, etc.)
             SpecMap = decoded
             -- Update activeSpecNumber immediately when spec info changes
@@ -2166,8 +2163,6 @@ specInfoListenerFrame:SetScript("OnEvent", function(self, event, ...)
                     end
                 end)
             end
-        else
-            print("DEBUG: DecodeSpecInfo returned nil");
         end
     end
 end)
